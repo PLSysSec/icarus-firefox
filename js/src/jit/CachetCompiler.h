@@ -42,6 +42,9 @@ using namespace ::cachet::prelude;
 struct CachetContext {
   CacheIRCompiler* compiler;
   JSContext* jsCx;
+  // TODO(spinda): Temporary hack.
+  CacheIRWriter* writer = nullptr;
+  IRGenerator* generator = nullptr;
 };
 
 using Cachet_ContextRef = CachetContext;
@@ -74,11 +77,9 @@ class CompilerInternals {
     return cx.compiler->addFailurePath(failure);
   }
 
-#ifdef DEBUG
   static bool& addedFailurePath(Cachet_ContextRef cx) {
     return allocator(cx).cachetAddedFailurePath_;
   }
-#endif
 
   static bool& hasAutoScratchFloatRegisterSpill(Cachet_ContextRef cx) {
     return allocator(cx).hasAutoScratchFloatRegisterSpill_;
@@ -112,6 +113,10 @@ class CompilerInternals {
     return cx.compiler->stringStubField(offset);
   }
 
+  static JS::Symbol* symbolStubField(Cachet_ContextRef cx, uint32_t offset) {
+    return cx.compiler->symbolStubField(offset);
+  }
+
   static const JSClass* classStubField(Cachet_ContextRef cx, uint32_t offset) {
     return cx.compiler->classStubField(offset);
   }
@@ -125,9 +130,7 @@ class CompilerInternals {
 
 }  // namespace detail
 
-inline void Cachet_Assert(bool cond) {
-  MOZ_ASSERT(cond);
-}
+#define Cachet_Assert(cond) MOZ_ASSERT(cond)
 
 template <typename T>
 struct GCType {
@@ -285,6 +288,8 @@ using Type_ValueTagId = PrimitiveType<ValueTagOperandId>;
 using Type_IntPtrId = PrimitiveType<IntPtrOperandId>;
 using Type_TypedId = PrimitiveType<TypedOperandId>;
 
+using Type_AttachDecision = PrimitiveType<AttachDecision>;
+
 //using Cast_OperandId_ValueId = PrimitiveCast<OperandId, ValueId>;
 //using Cast_OperandId_ObjectId = PrimitiveCast<OperandId, ObjectId>;
 // ...
@@ -343,7 +348,14 @@ inline void BindLabel(Cachet_ContextRef cx, OpsRef ops, LabelMutRef label) {
 
 };  // namespace IR_MASM
 
+namespace IR_CacheIR {
+
+using OpsRef = CacheIRWriter&;
+
+};  // namespace IR_CacheIR
+
 #define CACHET_CacheIR_COMPILER
+#define CACHET_CacheIR_EMIT
 #define CACHET_MASM_EMIT
 
 #include "jit/CachetGenerated.h"
@@ -374,7 +386,83 @@ inline Type_FloatRegSet::MutRef Var_liveFloatRegSet(Cachet_ContextRef cx) {
   return detail::CompilerInternals::liveFloatRegs(cx).set();
 }
 
+inline Type_UInt16::MutRef Var_nextOperandId(Cachet_ContextRef cx) {
+  return cx.writer->nextOperandId_;
+}
+
 }  // namespace Impl_CacheIR
+
+namespace Impl_ToPropertyKeyIRGenerator {
+
+inline Type_Value::Ref Var_value(Cachet_ContextRef cx) {
+  return static_cast<ToPropertyKeyIRGenerator*>(cx.generator)->val_;
+}
+
+};  // namespace Impl_ToPropertyKeyIRGenerator
+
+namespace Impl_UnaryArithIRGenerator {
+
+inline Type_JSOp::Ref Var_op_(Cachet_ContextRef cx) {
+  return static_cast<UnaryArithIRGenerator*>(cx.generator)->op_;
+}
+
+inline Type_Value::Ref Var_value(Cachet_ContextRef cx) {
+  return static_cast<UnaryArithIRGenerator*>(cx.generator)->val_;
+}
+
+inline Type_Value::Ref Var_resValue(Cachet_ContextRef cx) {
+  return static_cast<UnaryArithIRGenerator*>(cx.generator)->res_;
+}
+
+};  // namespace Impl_UnaryArithIRGenerator
+
+namespace Impl_BinaryArithIRGenerator {
+
+inline Type_JSOp::Ref Var_op_(Cachet_ContextRef cx) {
+  return static_cast<BinaryArithIRGenerator*>(cx.generator)->op_;
+}
+
+inline Type_Value::Ref Var_lhsValue(Cachet_ContextRef cx) {
+  return static_cast<BinaryArithIRGenerator*>(cx.generator)->lhs_;
+}
+
+inline Type_Value::Ref Var_rhsValue(Cachet_ContextRef cx) {
+  return static_cast<BinaryArithIRGenerator*>(cx.generator)->rhs_;
+}
+
+inline Type_Value::Ref Var_resValue(Cachet_ContextRef cx) {
+  return static_cast<BinaryArithIRGenerator*>(cx.generator)->res_;
+}
+
+};  // namespace Impl_BinaryArithIRGenerator
+
+namespace Impl_CompareIRGenerator {
+
+inline Type_JSOp::Ref Var_op_(Cachet_ContextRef cx) {
+  return static_cast<CompareIRGenerator*>(cx.generator)->op_;
+}
+
+inline Type_Value::Ref Var_lhsValue(Cachet_ContextRef cx) {
+  return static_cast<CompareIRGenerator*>(cx.generator)->lhsVal_;
+}
+
+inline Type_Value::Ref Var_rhsValue(Cachet_ContextRef cx) {
+  return static_cast<CompareIRGenerator*>(cx.generator)->rhsVal_;
+}
+
+};  // namespace Impl_CompareIRGenerator
+
+namespace Impl_GetElemIRGenerator {
+
+inline Type_Value::Ref Var_keyValue(Cachet_ContextRef cx) {
+  return static_cast<GetPropIRGenerator*>(cx.generator)->idVal_;
+}
+
+inline Type_ValueId::Ref Var_keyValueId(Cachet_ContextRef cx) {
+  return static_cast<GetPropIRGenerator*>(cx.generator)->getElemKeyValueId();
+}
+
+};  // namespace Impl_GetElemIRGenerator
 
 namespace Impl_MIRType {
 
@@ -612,6 +700,74 @@ inline Type_JSOp::Ref Variant_Le(Cachet_ContextRef cx) {
 
 inline Type_JSOp::Ref Variant_Ge(Cachet_ContextRef cx) {
   return JSOp::Ge;
+}
+
+inline Type_JSOp::Ref Variant_Pos(Cachet_ContextRef cx) {
+  return JSOp::Pos;
+}
+
+inline Type_JSOp::Ref Variant_Neg(Cachet_ContextRef cx) {
+  return JSOp::Neg;
+}
+
+inline Type_JSOp::Ref Variant_Inc(Cachet_ContextRef cx) {
+  return JSOp::Inc;
+}
+
+inline Type_JSOp::Ref Variant_Dec(Cachet_ContextRef cx) {
+  return JSOp::Dec;
+}
+
+inline Type_JSOp::Ref Variant_ToNumeric(Cachet_ContextRef cx) {
+  return JSOp::ToNumeric;
+}
+
+inline Type_JSOp::Ref Variant_BitNot(Cachet_ContextRef cx) {
+  return JSOp::BitNot;
+}
+
+inline Type_JSOp::Ref Variant_BitAnd(Cachet_ContextRef cx) {
+  return JSOp::BitAnd;
+}
+
+inline Type_JSOp::Ref Variant_BitOr(Cachet_ContextRef cx) {
+  return JSOp::BitOr;
+}
+
+inline Type_JSOp::Ref Variant_BitXor(Cachet_ContextRef cx) {
+  return JSOp::BitXor;
+}
+
+inline Type_JSOp::Ref Variant_Lsh(Cachet_ContextRef cx) {
+  return JSOp::Lsh;
+}
+
+inline Type_JSOp::Ref Variant_Rsh(Cachet_ContextRef cx) {
+  return JSOp::Rsh;
+}
+
+inline Type_JSOp::Ref Variant_Ursh(Cachet_ContextRef cx) {
+  return JSOp::Ursh;
+}
+
+inline Type_JSOp::Ref Variant_Add(Cachet_ContextRef cx) {
+  return JSOp::Add;
+}
+
+inline Type_JSOp::Ref Variant_Sub(Cachet_ContextRef cx) {
+  return JSOp::Sub;
+}
+
+inline Type_JSOp::Ref Variant_Mul(Cachet_ContextRef cx) {
+  return JSOp::Mul;
+}
+
+inline Type_JSOp::Ref Variant_Div(Cachet_ContextRef cx) {
+  return JSOp::Div;
+}
+
+inline Type_JSOp::Ref Variant_Mod(Cachet_ContextRef cx) {
+  return JSOp::Mod;
 }
 
 };  // namespace Impl_JSOp
@@ -947,6 +1103,15 @@ inline Type_Object::Ref To_Object_Ref(Type_NativeObject::Ref param_in) {
       reinterpret_cast<JSObject* const*>(param_in.address()));
 }
 
+inline Type_ArrayObject::Val To_ArrayObject_Val(Type_NativeObject::Val&& param_in) {
+  return &param_in->as<ArrayObject>();
+}
+
+inline Type_ArrayObject::Ref To_ArrayObject_Ref(Type_NativeObject::Ref param_in) {
+  return Handle<ArrayObject*>::fromMarkedLocation(
+      reinterpret_cast<ArrayObject* const*>(param_in.address()));
+}
+
 inline Type_ArgumentsObject::Val To_ArgumentsObject_Val(Type_NativeObject::Val&& param_in) {
   return &param_in->as<ArgumentsObject>();
 }
@@ -969,6 +1134,19 @@ inline Type_BaseIndex::Ref To_BaseIndex_Ref(Type_BaseValueIndex::Ref in) {
 }
 
 };  // namespace Impl_BaseValueIndex
+
+namespace Impl_ArgumentsObject {
+
+inline Type_NativeObject::Val To_NativeObject_Val(Type_ArgumentsObject::Val&& param_in) {
+  return param_in;
+}
+
+inline Type_NativeObject::Ref To_NativeObject_Ref(Type_ArgumentsObject::Ref param_in) {
+  return Handle<NativeObject*>::fromMarkedLocation(
+      reinterpret_cast<NativeObject* const*>(param_in.address()));
+}
+
+};  // namespace Impl_ArgumentsObject
 
 namespace Impl_BaseObjectElementIndex {
 
@@ -993,6 +1171,34 @@ inline Type_BaseValueIndex::Ref To_BaseValueIndex_Ref(Type_BaseObjectSlotIndex::
 }
 
 };  // namespace Impl_BaseObjectSlotIndex
+
+namespace Impl_Atom {
+
+inline Type_String::Val To_String_Val(Type_Atom::Val&& in) {
+  return in;
+}
+
+inline Type_String::Ref To_String_Ref(Type_Atom::Ref in) {
+  return in;
+}
+
+};  // namespace Impl_Atom
+
+namespace Impl_AtomState {
+
+inline Type_Atom::Ref Var_length(Cachet_ContextRef cx) {
+  return cx.jsCx->names().length.toHandle();
+}
+
+inline Type_Atom::Ref Var_null(Cachet_ContextRef cx) {
+  return cx.jsCx->names().null.toHandle();
+}
+
+inline Type_Atom::Ref Var_undefined(Cachet_ContextRef cx) {
+  return cx.jsCx->names().undefined.toHandle();
+}
+
+};  // namespace Impl_AtomState
 
 namespace Impl_ValueId {
 
@@ -1125,6 +1331,26 @@ inline Type_OperandId::Ref To_OperandId_Ref(Type_TypedId::Ref in) {
 }
 
 };  // namespace Impl_TypedId
+
+namespace Impl_AttachDecision {
+
+inline Type_AttachDecision::Ref Variant_NoAction(Cachet_ContextRef cx) {
+  return AttachDecision::NoAction;
+}
+
+inline Type_AttachDecision::Ref Variant_Attach(Cachet_ContextRef cx) {
+  return AttachDecision::Attach;
+}
+
+inline Type_AttachDecision::Ref Variant_TemporarilyUnoptimizable(Cachet_ContextRef cx) {
+  return AttachDecision::TemporarilyUnoptimizable;
+}
+
+inline Type_AttachDecision::Ref Variant_Deferred(Cachet_ContextRef cx) {
+  return AttachDecision::Deferred;
+}
+
+};  // namespace Impl_AttachDecision
 
 };  // namespace cachet
 

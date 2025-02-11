@@ -19,6 +19,9 @@
 #include "jit/BaselineIC.h"
 #include "jit/CacheIRCompiler.h"
 #include "jit/CacheIRSpewer.h"
+#ifdef JS_CACHET
+#  include "jit/CachetCompiler.h"
+#endif
 #include "jit/InlinableNatives.h"
 #include "jit/JitContext.h"
 #include "js/experimental/JitInfo.h"  // JSJitInfo
@@ -902,43 +905,31 @@ static bool CanAttachDOMCall(JSContext* cx, JSJitInfo::OpType type,
   MOZ_ASSERT(type == JSJitInfo::Getter || type == JSJitInfo::Setter ||
              type == JSJitInfo::Method);
 
-  fprintf(stderr, "hello\n");
-
   if (mode != ICState::Mode::Specialized) {
-    fprintf(stderr, "rejecting due to not specialized\n");
     return false;
   }
 
   if (!fun->hasJitInfo()) {
-    fprintf(stderr, "rejecting due to no JIT info\n");
     return false;
   }
 
   if (cx->realm() != fun->realm()) {
-    fprintf(stderr, "rejecting due to bad realm\n");
     return false;
   }
 
   const JSJitInfo* jitInfo = fun->jitInfo();
   MOZ_ASSERT_IF(IsWindow(obj), !jitInfo->needsOuterizedThisObject());
   if (jitInfo->type() != type) {
-    fprintf(stderr, "rejecting due to bad type\n");
     return false;
   }
 
   const JSClass* clasp = obj->getClass();
   if (!clasp->isDOMClass()) {
-    fprintf(stderr, "rejecting due to not DOM class\n");
     return false;
   }
 
   if (type != JSJitInfo::Method && clasp->isProxyObject()) {
-    fprintf(stderr, "rejecting due to is proxy\n");
     return false;
-  }
-
-  if (obj->is<NativeObject>()) {
-    fprintf(stderr, "(btw, it's a native object with %d fixed slot(s))\n", obj->as<NativeObject>().numFixedSlots());
   }
 
   // Tell the analysis the |DOMInstanceClassHasProtoAtDepth| hook can't GC.
@@ -946,13 +937,7 @@ static bool CanAttachDOMCall(JSContext* cx, JSJitInfo::OpType type,
 
   DOMInstanceClassHasProtoAtDepth instanceChecker =
       cx->runtime()->DOMcallbacks->instanceClassMatchesProto;
-  const bool result = instanceChecker(clasp, jitInfo->protoID, jitInfo->depth);
-  if (result) {
-    fprintf(stderr, "going for it\n");
-  } else {
-    fprintf(stderr, "rejecting via instance checker\n");
-  }
-  return result;
+  return instanceChecker(clasp, jitInfo->protoID, jitInfo->depth);
 }
 
 static bool CanAttachDOMGetterSetter(JSContext* cx, JSJitInfo::OpType type,
@@ -1009,6 +994,53 @@ AttachDecision GetPropIRGenerator::tryAttachNative(HandleObject obj,
                                                    ObjOperandId objId,
                                                    HandleId id,
                                                    ValOperandId receiverId) {
+#ifdef JS_CACHET
+  if (mode_ == ICState::Mode::Specialized && !obj->shape()->isDictionary()) {
+    if (cacheKind_ == CacheKind::GetProp ||
+        cacheKind_ == CacheKind::GetPropSuper) {
+      AttachDecision decision =
+        cachet::Impl_GetPropIRGenerator::Fn_tryAttachNativeFixed(
+          cachet::CachetContext {nullptr, cx_, &writer, this},
+          writer,
+          obj, objId, id
+        );
+      if (decision == AttachDecision::Attach) {
+        trackAttached("NativeSlot");
+      }
+      if (decision != AttachDecision::NoAction) {
+        return decision;
+      }
+
+      decision =
+        cachet::Impl_GetPropIRGenerator::Fn_tryAttachNativeDynamic(
+          cachet::CachetContext {nullptr, cx_, &writer, this},
+          writer,
+          obj, objId, id
+        );
+      if (decision == AttachDecision::Attach) {
+        trackAttached("NativeSlot");
+      }
+      if (decision != AttachDecision::NoAction) {
+        return decision;
+      }
+    } else if (cacheKind_ == CacheKind::GetElem ||
+        cacheKind_ == CacheKind::GetElemSuper) {
+      AttachDecision decision =
+        cachet::Impl_GetElemIRGenerator::Fn_tryAttachNativeFixed(
+          cachet::CachetContext {nullptr, cx_, &writer, this},
+          writer,
+          obj, objId, id
+        );
+      if (decision == AttachDecision::Attach) {
+        trackAttached("NativeSlot");
+      }
+      if (decision != AttachDecision::NoAction) {
+        return decision;
+      }
+    }
+  }
+#endif
+
   Maybe<PropertyInfo> prop;
   NativeObject* holder = nullptr;
 
@@ -1667,6 +1699,22 @@ AttachDecision GetPropIRGenerator::tryAttachProxy(HandleObject obj,
 AttachDecision GetPropIRGenerator::tryAttachObjectLength(HandleObject obj,
                                                          ObjOperandId objId,
                                                          HandleId id) {
+#ifdef JS_CACHET
+  if (cacheKind_ == CacheKind::GetProp ||
+      cacheKind_ == CacheKind::GetPropSuper) {
+    const AttachDecision decision =
+      cachet::Impl_GetPropIRGenerator::Fn_tryAttachObjectLength(
+        cachet::CachetContext {nullptr, cx_, &writer, this},
+        writer,
+        obj, objId, id
+      );
+    if (decision == AttachDecision::Attach) {
+      trackAttached("ArrayLength");
+    }
+    return decision;
+  }
+#endif
+
   if (!id.isAtom(cx_->names().length)) {
     return AttachDecision::NoAction;
   }
@@ -2247,6 +2295,18 @@ AttachDecision GetPropIRGenerator::tryAttachStringChar(ValOperandId valId,
 AttachDecision GetPropIRGenerator::tryAttachArgumentsObjectArg(
     HandleObject obj, ObjOperandId objId, uint32_t index,
     Int32OperandId indexId) {
+#ifdef JS_CACHET
+  const AttachDecision decision =
+    cachet::Impl_GetPropIRGenerator::Fn_tryAttachArgumentsObjectArg(
+      cachet::CachetContext {nullptr, cx_, &writer, this},
+      writer,
+      obj, objId, index, indexId
+    );
+  if (decision == AttachDecision::Attach) {
+    trackAttached("ArgumentsObjectArg");
+  }
+  return decision;
+#else
   if (!obj->is<ArgumentsObject>()) {
     return AttachDecision::NoAction;
   }
@@ -2279,6 +2339,7 @@ AttachDecision GetPropIRGenerator::tryAttachArgumentsObjectArg(
 
   trackAttached("ArgumentsObjectArg");
   return AttachDecision::Attach;
+#endif
 }
 
 AttachDecision GetPropIRGenerator::tryAttachArgumentsObjectCallee(
@@ -2314,6 +2375,18 @@ AttachDecision GetPropIRGenerator::tryAttachArgumentsObjectCallee(
 AttachDecision GetPropIRGenerator::tryAttachDenseElement(
     HandleObject obj, ObjOperandId objId, uint32_t index,
     Int32OperandId indexId) {
+#ifdef JS_CACHET
+  const AttachDecision decision =
+    cachet::Impl_GetElemIRGenerator::Fn_tryAttachDenseElement(
+      cachet::CachetContext {nullptr, cx_, &writer, this},
+      writer,
+      obj, objId, index, indexId
+    );
+  if (decision == AttachDecision::Attach) {
+    trackAttached("DenseElement");
+  }
+  return decision;
+#else
   if (!obj->is<NativeObject>()) {
     return AttachDecision::NoAction;
   }
@@ -2329,6 +2402,7 @@ AttachDecision GetPropIRGenerator::tryAttachDenseElement(
 
   trackAttached("DenseElement");
   return AttachDecision::Attach;
+#endif
 }
 
 static bool ClassCanHaveExtraProperties(const JSClass* clasp) {
@@ -9784,6 +9858,18 @@ AttachDecision CompareIRGenerator::tryAttachSymbol(ValOperandId lhsId,
 
 AttachDecision CompareIRGenerator::tryAttachStrictDifferentTypes(
     ValOperandId lhsId, ValOperandId rhsId) {
+#ifdef JS_CACHET
+  const AttachDecision decision =
+    cachet::Impl_CompareIRGenerator::Fn_tryAttachStrictDifferentTypes(
+      cachet::CachetContext {nullptr, cx_, &writer, this},
+      writer,
+      lhsId, rhsId
+    );
+  if (decision == AttachDecision::Attach) {
+    trackAttached("Compare.StrictDifferentTypes");
+  }
+  return decision;
+#else
   MOZ_ASSERT(IsEqualityOp(op_));
 
   if (op_ != JSOp::StrictEq && op_ != JSOp::StrictNe) {
@@ -9808,10 +9894,23 @@ AttachDecision CompareIRGenerator::tryAttachStrictDifferentTypes(
 
   trackAttached("StrictDifferentTypes");
   return AttachDecision::Attach;
+#endif
 }
 
 AttachDecision CompareIRGenerator::tryAttachInt32(ValOperandId lhsId,
                                                   ValOperandId rhsId) {
+#ifdef JS_CACHET
+  const AttachDecision decision =
+    cachet::Impl_CompareIRGenerator::Fn_tryAttachInt32(
+      cachet::CachetContext {nullptr, cx_, &writer, this},
+      writer,
+      lhsId, rhsId
+    );
+  if (decision == AttachDecision::Attach) {
+    trackAttached("Compare.Int32");
+  }
+  return decision;
+#else
   if ((!lhsVal_.isInt32() && !lhsVal_.isBoolean()) ||
       (!rhsVal_.isInt32() && !rhsVal_.isBoolean())) {
     return AttachDecision::NoAction;
@@ -9834,6 +9933,7 @@ AttachDecision CompareIRGenerator::tryAttachInt32(ValOperandId lhsId,
 
   trackAttached(lhsVal_.isBoolean() ? "Boolean" : "Int32");
   return AttachDecision::Attach;
+#endif
 }
 
 AttachDecision CompareIRGenerator::tryAttachNumber(ValOperandId lhsId,
@@ -9899,6 +9999,18 @@ AttachDecision CompareIRGenerator::tryAttachNumberUndefined(
 
 AttachDecision CompareIRGenerator::tryAttachAnyNullUndefined(
     ValOperandId lhsId, ValOperandId rhsId) {
+#ifdef JS_CACHET
+  const AttachDecision decision =
+    cachet::Impl_CompareIRGenerator::Fn_tryAttachAnyNullUndefined(
+      cachet::CachetContext {nullptr, cx_, &writer, this},
+      writer,
+      lhsId, rhsId
+    );
+  if (decision == AttachDecision::Attach) {
+    trackAttached("Compare.AnyNullUndefined");
+  }
+  return decision;
+#else
   MOZ_ASSERT(IsEqualityOp(op_));
 
   // Either RHS or LHS needs to be null/undefined.
@@ -9940,6 +10052,7 @@ AttachDecision CompareIRGenerator::tryAttachAnyNullUndefined(
 
   writer.returnFromIC();
   return AttachDecision::Attach;
+#endif
 }
 
 // Handle {null/undefined} x {null,undefined} equality comparisons
@@ -10444,6 +10557,17 @@ AttachDecision UnaryArithIRGenerator::tryAttachStub() {
 }
 
 AttachDecision UnaryArithIRGenerator::tryAttachInt32() {
+#ifdef JS_CACHET
+  const AttachDecision decision =
+    cachet::Impl_UnaryArithIRGenerator::Fn_tryAttachInt32(
+      cachet::CachetContext {nullptr, cx_, &writer, this},
+      writer
+    );
+  if (decision == AttachDecision::Attach) {
+    trackAttached("UnaryArith.Int32");
+  }
+  return decision;
+#else
   if (op_ == JSOp::BitNot) {
     return AttachDecision::NoAction;
   }
@@ -10481,6 +10605,7 @@ AttachDecision UnaryArithIRGenerator::tryAttachInt32() {
 
   writer.returnFromIC();
   return AttachDecision::Attach;
+#endif
 }
 
 AttachDecision UnaryArithIRGenerator::tryAttachNumber() {
@@ -10556,6 +10681,20 @@ static Int32OperandId EmitTruncateToInt32Guard(CacheIRWriter& writer,
 }
 
 AttachDecision UnaryArithIRGenerator::tryAttachBitwise() {
+#ifdef JS_CACHET
+  const AttachDecision decision =
+    cachet::Impl_UnaryArithIRGenerator::Fn_tryAttachBitwise(
+      cachet::CachetContext {nullptr, cx_, &writer, this},
+      writer
+    );
+  if (decision == AttachDecision::Attach) {
+    trackAttached("UnaryArith.Bitwise");
+  }
+  if (decision != AttachDecision::NoAction) {
+    return decision;
+  }
+#endif
+
   // Only bitwise operators.
   if (op_ != JSOp::BitNot) {
     return AttachDecision::NoAction;
@@ -10734,6 +10873,17 @@ AttachDecision ToPropertyKeyIRGenerator::tryAttachStub() {
 }
 
 AttachDecision ToPropertyKeyIRGenerator::tryAttachInt32() {
+#ifdef JS_CACHET
+  const AttachDecision decision =
+    cachet::Impl_ToPropertyKeyIRGenerator::Fn_tryAttachInt32(
+      cachet::CachetContext {nullptr, cx_, &writer, this},
+      writer
+    );
+  if (decision == AttachDecision::Attach) {
+    trackAttached("ToPropertyKey.Int32");
+  }
+  return decision;
+#else
   if (!val_.isInt32()) {
     return AttachDecision::NoAction;
   }
@@ -10746,9 +10896,21 @@ AttachDecision ToPropertyKeyIRGenerator::tryAttachInt32() {
 
   trackAttached("ToPropertyKey.Int32");
   return AttachDecision::Attach;
+#endif
 }
 
 AttachDecision ToPropertyKeyIRGenerator::tryAttachNumber() {
+#ifdef JS_CACHET
+  const AttachDecision decision =
+    cachet::Impl_ToPropertyKeyIRGenerator::Fn_tryAttachNumber(
+      cachet::CachetContext {nullptr, cx_, &writer, this},
+      writer
+    );
+  if (decision == AttachDecision::Attach) {
+    trackAttached("ToPropertyKey.Number");
+  }
+  return decision;
+#else
   if (!val_.isNumber()) {
     return AttachDecision::NoAction;
   }
@@ -10767,9 +10929,21 @@ AttachDecision ToPropertyKeyIRGenerator::tryAttachNumber() {
 
   trackAttached("ToPropertyKey.Number");
   return AttachDecision::Attach;
+#endif
 }
 
 AttachDecision ToPropertyKeyIRGenerator::tryAttachString() {
+#ifdef JS_CACHET
+  const AttachDecision decision =
+    cachet::Impl_ToPropertyKeyIRGenerator::Fn_tryAttachString(
+      cachet::CachetContext {nullptr, cx_, &writer, this},
+      writer
+    );
+  if (decision == AttachDecision::Attach) {
+    trackAttached("ToPropertyKey.String");
+  }
+  return decision;
+#else
   if (!val_.isString()) {
     return AttachDecision::NoAction;
   }
@@ -10782,9 +10956,21 @@ AttachDecision ToPropertyKeyIRGenerator::tryAttachString() {
 
   trackAttached("ToPropertyKey.String");
   return AttachDecision::Attach;
+#endif
 }
 
 AttachDecision ToPropertyKeyIRGenerator::tryAttachSymbol() {
+#ifdef JS_CACHET
+  const AttachDecision decision =
+    cachet::Impl_ToPropertyKeyIRGenerator::Fn_tryAttachSymbol(
+      cachet::CachetContext {nullptr, cx_, &writer, this},
+      writer
+    );
+  if (decision == AttachDecision::Attach) {
+    trackAttached("ToPropertyKey.Symbol");
+  }
+  return decision;
+#else
   if (!val_.isSymbol()) {
     return AttachDecision::NoAction;
   }
@@ -10797,6 +10983,7 @@ AttachDecision ToPropertyKeyIRGenerator::tryAttachSymbol() {
 
   trackAttached("ToPropertyKey.Symbol");
   return AttachDecision::Attach;
+#endif
 }
 
 BinaryArithIRGenerator::BinaryArithIRGenerator(JSContext* cx,
@@ -10856,6 +11043,20 @@ AttachDecision BinaryArithIRGenerator::tryAttachStub() {
 }
 
 AttachDecision BinaryArithIRGenerator::tryAttachBitwise() {
+#ifdef JS_CACHET
+  const AttachDecision decision =
+    cachet::Impl_BinaryArithIRGenerator::Fn_tryAttachBitwise(
+      cachet::CachetContext {nullptr, cx_, &writer, this},
+      writer
+    );
+  if (decision == AttachDecision::Attach) {
+    trackAttached("BinaryArith.Bitwise");
+  }
+  if (decision != AttachDecision::NoAction) {
+    return decision;
+  }
+#endif
+
   // Only bit-wise and shifts.
   if (op_ != JSOp::BitOr && op_ != JSOp::BitXor && op_ != JSOp::BitAnd &&
       op_ != JSOp::Lsh && op_ != JSOp::Rsh && op_ != JSOp::Ursh) {
@@ -10960,6 +11161,20 @@ AttachDecision BinaryArithIRGenerator::tryAttachDouble() {
 }
 
 AttachDecision BinaryArithIRGenerator::tryAttachInt32() {
+#ifdef JS_CACHET
+  const AttachDecision decision =
+    cachet::Impl_BinaryArithIRGenerator::Fn_tryAttachInt32(
+      cachet::CachetContext {nullptr, cx_, &writer, this},
+      writer
+    );
+  if (decision == AttachDecision::Attach) {
+    trackAttached("BinaryArith.Int32");
+  }
+  if (decision != AttachDecision::NoAction) {
+    return decision;
+  }
+#endif
+
   // Check guard conditions
   if (!(lhs_.isInt32() || lhs_.isBoolean()) ||
       !(rhs_.isInt32() || rhs_.isBoolean())) {

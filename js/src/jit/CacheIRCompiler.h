@@ -31,6 +31,16 @@ enum class ICStubEngine : uint8_t;
 
 class IonICStub;
 
+#ifdef JS_CACHET
+namespace cachet {
+namespace detail {
+
+class CompilerInternals;
+
+}  // namespace detail
+}  // namespace cachet
+#endif
+
 // [SMDOC] CacheIR Value Representation and Tracking
 //
 // While compiling an IC stub the CacheIR compiler needs to keep track of the

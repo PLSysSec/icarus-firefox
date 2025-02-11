@@ -610,7 +610,11 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
   CompactBufferWriter buffer_;
 
   uint16_t numInputOperands_;
+
+  // TODO(spinda): Make this private again.
+ public:
   uint16_t nextOperandId_;
+ private:
   uint32_t nextInstructionId_;
 
   TypeData typeData_;
@@ -651,6 +655,8 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
   void assertSameZone(Shape* shape) {}
 #endif
 
+ // TODO(spinda): Make this private again.
+ public:
   void writeOp(CacheOp op) {
     buffer_.writeUnsigned15Bit(uint32_t(op));
     nextInstructionId_++;
@@ -690,9 +696,11 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
     operandLastUsed_[opId.id()] = nextInstructionId_ - 1;
   }
 
+ private:
   void writeCallFlagsImm(CallFlags flags) { buffer_.writeByte(flags.toByte()); }
 
-  void addStubField(uint64_t value, StubField::Type fieldType) {
+ public:
+  size_t addStubField(uint64_t value, StubField::Type fieldType) {
     size_t fieldOffset = stubDataSize_;
 #ifndef JS_64BIT
     // On 32-bit platforms there are two stub field sizes (4 bytes and 8 bytes).
@@ -716,56 +724,66 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
 #endif
       buffer_.propagateOOM(stubFields_.append(StubField(value, fieldType)));
       MOZ_ASSERT((fieldOffset % sizeof(uintptr_t)) == 0);
-      buffer_.writeByte(fieldOffset / sizeof(uintptr_t));
       stubDataSize_ = newStubDataSize;
     } else {
       tooLarge_ = true;
     }
+    return fieldOffset;
+  }
+
+  void writeStubField(const size_t fieldOffset) {
+    buffer_.writeByte(fieldOffset / sizeof(uintptr_t));
+  }
+
+ private:
+  void addAndWriteStubField(uint64_t value, StubField::Type fieldType) {
+    const size_t fieldOffset(addStubField(value, fieldType));
+    writeStubField(fieldOffset);
   }
 
   void writeShapeField(Shape* shape) {
     MOZ_ASSERT(shape);
     assertSameZone(shape);
-    addStubField(uintptr_t(shape), StubField::Type::Shape);
+    addAndWriteStubField(uintptr_t(shape), StubField::Type::Shape);
   }
   void writeGetterSetterField(GetterSetter* gs) {
     MOZ_ASSERT(gs);
-    addStubField(uintptr_t(gs), StubField::Type::GetterSetter);
+    addAndWriteStubField(uintptr_t(gs), StubField::Type::GetterSetter);
   }
   void writeObjectField(JSObject* obj) {
     MOZ_ASSERT(obj);
     assertSameCompartment(obj);
-    addStubField(uintptr_t(obj), StubField::Type::Object);
+    addAndWriteStubField(uintptr_t(obj), StubField::Type::Object);
   }
   void writeStringField(JSString* str) {
     MOZ_ASSERT(str);
-    addStubField(uintptr_t(str), StubField::Type::String);
+    addAndWriteStubField(uintptr_t(str), StubField::Type::String);
   }
   void writeSymbolField(JS::Symbol* sym) {
     MOZ_ASSERT(sym);
-    addStubField(uintptr_t(sym), StubField::Type::Symbol);
+    addAndWriteStubField(uintptr_t(sym), StubField::Type::Symbol);
   }
   void writeBaseScriptField(BaseScript* script) {
     MOZ_ASSERT(script);
-    addStubField(uintptr_t(script), StubField::Type::BaseScript);
+    addAndWriteStubField(uintptr_t(script), StubField::Type::BaseScript);
   }
   void writeRawInt32Field(uint32_t val) {
-    addStubField(val, StubField::Type::RawInt32);
+    addAndWriteStubField(val, StubField::Type::RawInt32);
   }
   void writeRawPointerField(const void* ptr) {
-    addStubField(uintptr_t(ptr), StubField::Type::RawPointer);
+    addAndWriteStubField(uintptr_t(ptr), StubField::Type::RawPointer);
   }
   void writeIdField(jsid id) {
-    addStubField(uintptr_t(JSID_BITS(id)), StubField::Type::Id);
+    addAndWriteStubField(uintptr_t(JSID_BITS(id)), StubField::Type::Id);
   }
   void writeValueField(const Value& val) {
-    addStubField(val.asRawBits(), StubField::Type::Value);
+    addAndWriteStubField(val.asRawBits(), StubField::Type::Value);
   }
   void writeRawInt64Field(uint64_t val) {
-    addStubField(val, StubField::Type::RawInt64);
+    addAndWriteStubField(val, StubField::Type::RawInt64);
   }
   void writeAllocSiteField(gc::AllocSite* ptr) {
-    addStubField(uintptr_t(ptr), StubField::Type::AllocSite);
+    addAndWriteStubField(uintptr_t(ptr), StubField::Type::AllocSite);
   }
 
   void writeJSOpImm(JSOp op) {
@@ -1352,8 +1370,11 @@ class MOZ_RAII IRGenerator {
 // GetPropIRGenerator generates CacheIR for a GetProp IC.
 class MOZ_RAII GetPropIRGenerator : public IRGenerator {
   HandleValue val_;
+  // TODO(spinda): Make this private again.
+ public:
   HandleValue idVal_;
 
+ private:
   AttachDecision tryAttachNative(HandleObject obj, ObjOperandId objId,
                                  HandleId id, ValOperandId receiverId);
   AttachDecision tryAttachObjectLength(HandleObject obj, ObjOperandId objId,
@@ -1427,12 +1448,15 @@ class MOZ_RAII GetPropIRGenerator : public IRGenerator {
 
   void attachMegamorphicNativeSlot(ObjOperandId objId, jsid id);
 
+  // TODO(spinda): Make this private again.
+ public:
   ValOperandId getElemKeyValueId() const {
     MOZ_ASSERT(cacheKind_ == CacheKind::GetElem ||
                cacheKind_ == CacheKind::GetElemSuper);
     return ValOperandId(1);
   }
 
+ private:
   ValOperandId getSuperReceiverValueId() const {
     if (cacheKind_ == CacheKind::GetPropSuper) {
       return ValOperandId(1);
@@ -1872,10 +1896,13 @@ class MOZ_RAII CallIRGenerator : public IRGenerator {
 };
 
 class MOZ_RAII CompareIRGenerator : public IRGenerator {
+  // TODO(spinda): Make this private again.
+ public:
   JSOp op_;
   HandleValue lhsVal_;
   HandleValue rhsVal_;
 
+ private:
   AttachDecision tryAttachString(ValOperandId lhsId, ValOperandId rhsId);
   AttachDecision tryAttachObject(ValOperandId lhsId, ValOperandId rhsId);
   AttachDecision tryAttachSymbol(ValOperandId lhsId, ValOperandId rhsId);
@@ -1941,9 +1968,12 @@ class MOZ_RAII GetIntrinsicIRGenerator : public IRGenerator {
 };
 
 class MOZ_RAII UnaryArithIRGenerator : public IRGenerator {
+  // TODO(spinda): Make this private again.
+ public:
   JSOp op_;
   HandleValue val_;
   HandleValue res_;
+ private:
 
   AttachDecision tryAttachInt32();
   AttachDecision tryAttachNumber();
@@ -1963,7 +1993,10 @@ class MOZ_RAII UnaryArithIRGenerator : public IRGenerator {
 };
 
 class MOZ_RAII ToPropertyKeyIRGenerator : public IRGenerator {
+  // TODO(spinda): Make this private again.
+ public:
   HandleValue val_;
+ private:
 
   AttachDecision tryAttachInt32();
   AttachDecision tryAttachNumber();
@@ -1980,11 +2013,14 @@ class MOZ_RAII ToPropertyKeyIRGenerator : public IRGenerator {
 };
 
 class MOZ_RAII BinaryArithIRGenerator : public IRGenerator {
+  // TODO(spinda): Make this private again.
+ public:
   JSOp op_;
   HandleValue lhs_;
   HandleValue rhs_;
   HandleValue res_;
 
+ private:
   void trackAttached(const char* name);
 
   AttachDecision tryAttachInt32();

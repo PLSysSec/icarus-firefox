@@ -40,6 +40,7 @@ enum JSOp {
     Sub,
     Inc,
     Dec,
+    Mul,
     Div,
     Mod,
     ToPropertyKey,

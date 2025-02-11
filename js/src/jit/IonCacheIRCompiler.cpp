@@ -557,6 +557,11 @@ bool IonCacheIRCompiler::emitGuardSpecificAtom(StringOperandId strId,
 
 bool IonCacheIRCompiler::emitGuardSpecificSymbol(SymbolOperandId symId,
                                                  uint32_t expectedOffset) {
+#ifdef JS_CACHET
+  if (isCachetEnabled_) {
+    cachet::Impl_CacheIR::Op_GuardSpecificSymbol(cachet::CachetContext {this, cx_}, masm, symId, expectedOffset);
+  } else {
+#endif
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
   Register sym = allocator.useRegister(masm, symId);
   JS::Symbol* expected = symbolStubField(expectedOffset);
@@ -568,6 +573,9 @@ bool IonCacheIRCompiler::emitGuardSpecificSymbol(SymbolOperandId symId,
 
   masm.branchPtr(Assembler::NotEqual, sym, ImmGCPtr(expected),
                  failure->label());
+#ifdef JS_CACHET
+  }
+#endif
   return true;
 }
 
@@ -1646,8 +1654,9 @@ void IonIC::attachCacheIRStub(JSContext* cx, const CacheIRWriter& writer,
       new (newStubMem) IonICStub(fallbackAddr(ionScript), stubInfo);
   writer.copyStubData(newStub->stubDataStart());
 
-  /*
 #ifdef JS_CACHET
+/*
+#  ifdef DEBUG
   Sprinter masmPrinterCachetDisabled(cx);
   if (!masmPrinterCachetDisabled.init()) {
     return;
@@ -1666,20 +1675,23 @@ void IonIC::attachCacheIRStub(JSContext* cx, const CacheIRWriter& writer,
       return;
     }
   }
+#  endif
+*/
 #endif
-  */
 
   JitContext jctx(cx, nullptr);
   IonCacheIRCompiler compiler(cx, writer, this, ionScript);
 #ifdef JS_CACHET
   compiler.enableCachet();
 /*
+#  ifdef DEBUG
   Sprinter masmPrinterCachetEnabled(cx);
   if (!masmPrinterCachetEnabled.init()) {
     return;
   }
   compiler.setMASMPrinter(&masmPrinterCachetEnabled);
-  */
+#  endif
+*/
 #endif
   if (!compiler.init()) {
     return;
@@ -1690,8 +1702,9 @@ void IonIC::attachCacheIRStub(JSContext* cx, const CacheIRWriter& writer,
     return;
   }
 
-  /*
 #ifdef JS_CACHET
+/*
+#  ifdef DEBUG
   const char* const asmCachetDisabled(masmPrinterCachetDisabled.string());
   const char* const asmCachetEnabled(masmPrinterCachetEnabled.string());
   const bool generatedMatchingASM(strcmp(asmCachetDisabled, asmCachetEnabled) == 0);
@@ -1700,8 +1713,9 @@ void IonIC::attachCacheIRStub(JSContext* cx, const CacheIRWriter& writer,
             asmCachetDisabled, asmCachetEnabled);
   }
   MOZ_ASSERT(generatedMatchingASM);
+#  endif
+*/
 #endif
-  */
 
   attachStub(newStub, code);
   *attached = true;

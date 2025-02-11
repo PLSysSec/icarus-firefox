@@ -423,7 +423,9 @@ impl Value {
 
     fn typeOf(value: Value) -> ValueType;
 
-    // ...
+    fn isSameType(a: Value, b: Value) -> Bool {
+        Value::typeOf(a) == Value::typeOf(b)
+    }
 
     fn isDouble(value: Value) -> Bool {
         Value::typeOf(value) == ValueType::Double
@@ -517,6 +519,10 @@ impl Value {
 
     fn isUndefined(value: Value) -> Bool {
         Value::typeOf(value) == ValueType::Undefined
+    }
+
+    fn isNullOrUndefined(value: Value) -> Bool {
+        Value::isNull(value) || Value::isUndefined(value)
     }
 
     fn isObject(value: Value) -> Bool {
@@ -639,10 +645,19 @@ impl Object {
         let class = Shape::classOf(shape);
         Class::isNativeObject(class)
     }
-
     fn toNativeObject(object: Object) -> NativeObject {
         assert Object::isNativeObject(object);
         (unsafe { object as NativeObject })
+    }
+
+    fn isArrayObject(object: Object) -> Bool {
+        let shape = Object::shapeOf(object);
+        let class = Shape::classOf(shape);
+        Class::isArrayObject(class)
+    }
+    fn toArrayObject(object: Object) -> ArrayObject {
+        assert Object::isArrayObject(object);
+        (unsafe { object as ArrayObject })
     }
 
     fn isArgumentsObject(object: Object) -> Bool {
@@ -650,7 +665,16 @@ impl Object {
         let class = Shape::classOf(shape);
         Class::isArgumentsObject(class)
     }
-
+    fn isMappedArgumentsObject(object: Object) -> Bool {
+        let shape = Object::shapeOf(object);
+        let class = Shape::classOf(shape);
+        Class::isMappedArgumentsObject(class)
+    }
+    fn isUnmappedArgumentsObject(object: Object) -> Bool {
+        let shape = Object::shapeOf(object);
+        let class = Shape::classOf(shape);
+        Class::isUnmappedArgumentsObject(class)
+    }
     fn toArgumentsObject(object: Object) -> ArgumentsObject {
         assert Object::isArgumentsObject(object);
         (unsafe { object as ArgumentsObject })
@@ -675,12 +699,12 @@ impl Object {
             assume Object::isNativeObject(object);
             let nativeObject = Object::toNativeObject(object);
 
-            assume MaybeNativeObject::isNativeObject(holder);
-            let nativeHolder = MaybeNativeObject::toNativeObject(holder);
-
-            assume isCacheableProtoChain(nativeObject, nativeHolder);
-
             if PropertyResult::isNativeProperty(propInfo) {
+                assume MaybeNativeObject::isNativeObject(holder);
+                let nativeHolder = MaybeNativeObject::toNativeObject(holder);
+
+                assume isCacheableProtoChain(nativeObject, nativeHolder);
+
                 let prop = PropertyResult::propertyInfo(propInfo);
                 if PropertyInfo::hasSlot(prop) {
                     assume NativeObject::hasSlot(nativeHolder, PropertyInfo::slot(prop));
@@ -811,6 +835,8 @@ impl NativeObject {
     unsafe fn getElementsHeaderUnchecked(heap: Heap, nativeObject: NativeObject) ->
     NativeObjectElements;
 
+    fn containsDenseElement(nativeObject: NativeObject, index: UInt32) -> Bool;
+
     #[spec]
     fn readData(nativeObject: NativeObject, offset: Int64) -> RegData {
         if offset == NativeObject::offsetOfSlots as Int64 {
@@ -932,6 +958,11 @@ impl ArrayObject {
         assume Class::isNativeObject(ArrayObject::rawClass);
         ArrayObject::rawClass
     }
+
+    fn length(arrayObject: ArrayObject) -> UInt32 {
+        (unsafe { ArrayObject::lengthUnchecked(heap, arrayObject) })
+    }
+    fn lengthUnchecked(heap: Heap, arrayObject: ArrayObject) -> UInt32;
 }
 
 struct PlainObject <: NativeObject;
@@ -1023,6 +1054,8 @@ impl ArgumentsObject {
     }
 
     unsafe fn getArgumentsDataUnchecked(heap: Heap, obj: ArgumentsObject) -> ArgumentsData;
+
+    fn argIsForwarded(obj: ArgumentsObject, index: UInt32) -> Bool;
 }
 
 struct ArgumentsData {
@@ -1087,6 +1120,23 @@ struct PropertyKey;
 impl PropertyKey {
     fn isString(key: PropertyKey) -> Bool;
     fn isSymbol(key: PropertyKey) -> Bool;
+
+    fn isAtom(key: PropertyKey, atom: Atom) -> Bool;
+
+    fn toSymbol(key: PropertyKey) -> Symbol {
+        assert PropertyKey::isSymbol(key);
+        (unsafe { PropertyKey::toSymbolUnchecked(key) })
+    }
+    unsafe fn toSymbolUnchecked(key: PropertyKey) -> Symbol;
+
+    fn toAtom(key: PropertyKey) -> Atom {
+        assert PropertyKey::isString(key);
+
+        let atom = (unsafe { PropertyKey::toAtomUnchecked(key) });
+        assume String::isAtom(atom);
+        atom
+    }
+    unsafe fn toAtomUnchecked(key: PropertyKey) -> Atom;
 
     fn nameOrSymbolFromValue(value: Value, out key: PropertyKey, out nameOrSymbol: Bool) -> Bool {
         let success = (unsafe {
@@ -1285,9 +1335,18 @@ impl Class {
     fn isNativeObject(class: Class) -> Bool;
     fn isProxyObject(class: Class) -> Bool;
 
+    fn isArrayObject(class: Class) -> Bool {
+        class == ArrayObject::class()
+    }
+
     fn isArgumentsObject(class: Class) -> Bool {
-        class == MappedArgumentsObject::class() ||
-            class == UnmappedArgumentsObject::class()
+        Class::isMappedArgumentsObject(class) || Class::isUnmappedArgumentsObject(class)
+    }
+    fn isMappedArgumentsObject(class: Class) -> Bool {
+        class == MappedArgumentsObject::class()
+    }
+    fn isUnmappedArgumentsObject(class: Class) -> Bool {
+        class == UnmappedArgumentsObject::class()
     }
 }
 
@@ -1310,6 +1369,14 @@ impl String {
 fn equalStringsHelperPure(str1: String, str2: String) -> Bool;
 
 struct Atom <: String;
+
+struct AtomState;
+
+impl AtomState {
+    var length: Atom;
+    var null: Atom;
+    var undefined: Atom;
+}
 
 struct Symbol;
 

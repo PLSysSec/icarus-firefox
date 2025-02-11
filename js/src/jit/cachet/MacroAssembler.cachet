@@ -1040,6 +1040,28 @@ ir MASM {
         }
     }
 
+    op BranchSymbolImmGCPtr(
+        condition: Condition,
+        lhsReg: Reg,
+        rhs: Symbol,
+        label branch: MASM,
+    ) {
+        let lhs = MASM::getSymbol(lhsReg);
+        let isEqual = lhs == rhs;
+
+        if condition == Condition::Equal {
+            if isEqual {
+                goto branch;
+            }
+        }
+
+        if condition == Condition::NotEqual {
+            if !isEqual {
+                goto branch;
+            }
+        }
+    }
+
     op ConvertInt32ValueToDouble(valueReg: ValueReg) {
         let value = MASM::getValue(valueReg);
 

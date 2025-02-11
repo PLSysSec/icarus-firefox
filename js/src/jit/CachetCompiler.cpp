@@ -182,6 +182,10 @@ Type_NativeObjectElements::Val Fn_getElementsHeaderUnchecked(Cachet_ContextRef c
   return param_nativeObject->getElementsHeader()->elements();
 }
 
+Type_Bool::Val Fn_containsDenseElement(Cachet_ContextRef cx, Type_NativeObject::Ref param_nativeObject, Type_UInt32::Ref param_index) {
+  return param_nativeObject->containsDenseElement(param_index);
+}
+
 };  // namespace Impl_NativeObject
 
 namespace Impl_NativeObjectSlots {
@@ -223,6 +227,14 @@ Type_Value::Val Fn_getElementUnchecked(Cachet_ContextRef cx,
 
 };  // namespace Impl_NativeObjectElements
 
+namespace Impl_ArrayObject {
+
+Type_UInt32::Val Fn_lengthUnchecked(Cachet_ContextRef cx, Type_Heap::Ref param_heap, Type_ArrayObject::Ref param_arrayObject) {
+  return param_arrayObject->length();
+}
+
+};  // namespace Impl_ArrayObject
+
 namespace Impl_ArgumentsObject {
 
 Type_UInt32::Val Fn_getInitialLengthSlotUnchecked(Cachet_ContextRef cx, Type_Heap::Ref param_heap, Type_ArgumentsObject::Ref param_obj) {
@@ -233,6 +245,10 @@ Type_ArgumentsData::Val Fn_getArgumentsDataUnchecked(Cachet_ContextRef cx, Type_
   return reinterpret_cast<ArgumentsData*>(
       param_obj->getFixedSlot(ArgumentsObject::DATA_SLOT).toPrivate()
   );
+}
+
+Type_Bool::Val Fn_argIsForwarded(Cachet_ContextRef cx, Type_ArgumentsObject::Ref param_obj, Type_UInt32::Ref param_index) {
+  return param_obj->argIsForwarded(param_index);
 }
 
 };  // namespace Impl_ArgumentsObject
@@ -344,6 +360,18 @@ Type_Bool::Val Fn_isString(Cachet_ContextRef cx, Type_PropertyKey::Ref param_key
 
 Type_Bool::Val Fn_isSymbol(Cachet_ContextRef cx, Type_PropertyKey::Ref param_key) {
   return param_key.isSymbol();
+}
+
+Type_Bool::Val Fn_isAtom(Cachet_ContextRef cx, Type_PropertyKey::Ref param_key, Type_Atom::Ref param_atom) {
+  return param_key.isAtom(param_atom);
+}
+
+Type_Symbol::Val Fn_toSymbolUnchecked(Cachet_ContextRef cx, Type_PropertyKey::Ref param_key) {
+  return param_key.toSymbol();
+}
+
+Type_Atom::Val Fn_toAtomUnchecked(Cachet_ContextRef cx, Type_PropertyKey::Ref param_key) {
+  return param_key.toAtom();
 }
 
 Type_Bool::Val Fn_nameOrSymbolFromValueUnchecked(
@@ -466,6 +494,14 @@ Type_Object::Val Fn_toObjectUnchecked(Cachet_ContextRef cx, Type_TaggedProto::Re
 }
 
 };  // namespace Impl_TaggedProto
+
+namespace Impl_ValueReg {
+
+Type_Reg::Val Fn_scratchReg(Cachet_ContextRef cx, Type_ValueReg::Ref param_valueReg) {
+  return param_valueReg.scratchReg();
+}
+
+};  // namespace Impl_ValueReg
 
 namespace Impl_FloatReg {
 
@@ -1032,6 +1068,10 @@ void EmitOp_CastBoolToInt32(Cachet_ContextRef cx, IR_MASM::OpsRef ops, Type_Reg:
   // Phantom op
 }
 
+void EmitOp_BranchSymbolImmGCPtr(Cachet_ContextRef cx, IR_MASM::OpsRef ops, Type_Condition::Ref param_condition, Type_Reg::Ref param_lhsReg, Type_Symbol::Ref param_rhs, IR_MASM::LabelRef param_branch) {
+  ops.branchPtr(param_condition, param_lhsReg, ImmGCPtr(param_rhs), param_branch);
+}
+
 void EmitOp_ConvertInt32ValueToDouble(Cachet_ContextRef cx, IR_MASM::OpsRef ops,
                                         Type_ValueReg::Ref param_valueReg) {
   ops.convertInt32ValueToDouble(param_valueReg);
@@ -1533,6 +1573,205 @@ void EmitOp_SplitTagForTest(Cachet_ContextRef cx,
 
 namespace Impl_CacheIR {
 
+void EmitOp_ReturnFromIC(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops) {
+  ops.returnFromIC();
+}
+
+void EmitOp_GuardToInt32(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ValueId::Ref param_inputId) {
+  ops.guardToInt32(param_inputId);
+}
+
+void EmitOp_GuardToInt32Index(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ValueId::Ref param_inputId, Type_Int32Id::Ref param_resultId) {
+  ops.writeOp(CacheOp::GuardToInt32Index);
+  ops.writeOperandId(param_inputId);
+  ops.writeOperandId(param_resultId);
+  ops.assertLengthMatches();
+}
+
+void EmitOp_GuardToString(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ValueId::Ref param_inputId) {
+  ops.guardToString(param_inputId);
+}
+
+void EmitOp_GuardToSymbol(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ValueId::Ref param_inputId) {
+  ops.guardToSymbol(param_inputId);
+}
+
+void EmitOp_GuardIsNull(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ValueId::Ref param_inputId) {
+  ops.guardIsNull(param_inputId);
+}
+
+void EmitOp_GuardIsUndefined(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ValueId::Ref param_inputId) {
+  ops.guardIsUndefined(param_inputId);
+}
+
+void EmitOp_GuardIsNullOrUndefined(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ValueId::Ref param_inputId) {
+  ops.guardIsNullOrUndefined(param_inputId);
+}
+
+void EmitOp_GuardBooleanToInt32(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ValueId::Ref param_inputId, Type_Int32Id::Ref param_resultId) {
+  ops.writeOp(CacheOp::GuardBooleanToInt32);
+  ops.writeOperandId(param_inputId);
+  ops.writeOperandId(param_resultId);
+  ops.assertLengthMatches();
+}
+
+void EmitOp_GuardTagNotEqual(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ValueTagId::Ref param_lhsId, Type_ValueTagId::Ref param_rhsId) {
+  ops.guardTagNotEqual(param_lhsId, param_rhsId);
+}
+
+void EmitOp_GuardShape(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ObjectId::Ref param_objectId, Type_ShapeField::Ref param_shapeField) {
+  ops.writeOp(CacheOp::GuardShape);
+  ops.writeOperandId(param_objectId);
+  ops.writeStubField(param_shapeField);
+  ops.assertLengthMatches();
+}
+
+void EmitOp_GuardClass(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ObjectId::Ref param_objId, Type_GuardClassKind::Ref param_kind) {
+  ops.guardClass(param_objId, param_kind);
+}
+
+void EmitOp_GuardSpecificSymbol(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_SymbolId::Ref param_symbolId, Type_SymbolField::Ref param_expectedSymbolField) {
+  ops.writeOp(CacheOp::GuardSpecificSymbol);
+  ops.writeOperandId(param_symbolId);
+  ops.writeStubField(param_expectedSymbolField);
+  ops.assertLengthMatches();
+}
+
+void EmitOp_GuardSpecificAtom(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_StringId::Ref param_strId, Type_StringField::Ref param_stringField) {
+  ops.writeOp(CacheOp::GuardSpecificAtom);
+  ops.writeOperandId(param_strId);
+  ops.writeStubField(param_stringField);
+  ops.assertLengthMatches();
+}
+
+void EmitOp_LoadValueTag(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ValueId::Ref param_valId, Type_ValueTagId::Ref param_resultId) {
+  ops.writeOp(CacheOp::LoadValueTag);
+  ops.writeOperandId(param_valId);
+  ops.writeOperandId(param_resultId);
+  ops.assertLengthMatches();
+}
+
+void EmitOp_LoadBooleanResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_Bool::Ref param_bool) {
+  ops.loadBooleanResult(param_bool);
+}
+
+void EmitOp_LoadInt32Result(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_Int32Id::Ref param_int32Id) {
+  ops.loadInt32Result(param_int32Id);
+}
+
+void EmitOp_LoadStringResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_StringId::Ref param_stringId) {
+  ops.loadStringResult(param_stringId);
+}
+
+void EmitOp_LoadSymbolResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_SymbolId::Ref param_symbolId) {
+  ops.loadSymbolResult(param_symbolId);
+}
+
+void EmitOp_LoadInt32Constant(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_Int32Field::Ref param_valField, Type_Int32Id::Ref param_resultId) {
+  ops.writeOp(CacheOp::LoadInt32Constant);
+  ops.writeStubField(param_valField);
+  ops.writeOperandId(param_resultId);
+  ops.assertLengthMatches();
+}
+
+void EmitOp_LoadDenseElementResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ObjectId::Ref param_objectId, Type_Int32Id::Ref param_indexId) {
+  ops.loadDenseElementResult(param_objectId, param_indexId);
+}
+
+void EmitOp_LoadInt32ArrayLengthResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ObjectId::Ref param_objectId) {
+  ops.loadInt32ArrayLengthResult(param_objectId);
+}
+
+void EmitOp_LoadArgumentsObjectLengthResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ObjectId::Ref param_objectId) {
+  ops.loadArgumentsObjectLengthResult(param_objectId);
+}
+
+void EmitOp_LoadArgumentsObjectArgResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ObjectId::Ref param_objId, Type_Int32Id::Ref param_indexId) {
+  ops.loadArgumentsObjectArgResult(param_objId, param_indexId);
+}
+
+void EmitOp_LoadFixedSlotResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ObjectId::Ref param_objectId, Type_Int32Field::Ref param_slotField) {
+  ops.writeOp(CacheOp::LoadFixedSlotResult);
+  ops.writeOperandId(param_objectId);
+  ops.writeStubField(param_slotField);
+  ops.assertLengthMatches();
+}
+
+void EmitOp_LoadDynamicSlotResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ObjectId::Ref param_objectId, Type_Int32Field::Ref param_slotField) {
+  ops.writeOp(CacheOp::LoadDynamicSlotResult);
+  ops.writeOperandId(param_objectId);
+  ops.writeStubField(param_slotField);
+  ops.assertLengthMatches();
+}
+
+void EmitOp_Int32NegationResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_Int32Id::Ref param_inputId) {
+  ops.int32NegationResult(param_inputId);
+}
+
+void EmitOp_Int32IncResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_Int32Id::Ref param_inputId) {
+  ops.int32IncResult(param_inputId);
+}
+
+void EmitOp_Int32DecResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_Int32Id::Ref param_inputId) {
+  ops.int32DecResult(param_inputId);
+}
+
+void EmitOp_Int32NotResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_Int32Id::Ref param_inputId) {
+  ops.int32NotResult(param_inputId);
+}
+
+void EmitOp_Int32AddResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_Int32Id::Ref param_lhsId, Type_Int32Id::Ref param_rhsId) {
+  ops.int32AddResult(param_lhsId, param_rhsId);
+}
+
+void EmitOp_Int32SubResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_Int32Id::Ref param_lhsId, Type_Int32Id::Ref param_rhsId) {
+  ops.int32SubResult(param_lhsId, param_rhsId);
+}
+
+void EmitOp_Int32MulResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_Int32Id::Ref param_lhsId, Type_Int32Id::Ref param_rhsId) {
+  ops.int32MulResult(param_lhsId, param_rhsId);
+}
+
+void EmitOp_Int32DivResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_Int32Id::Ref param_lhsId, Type_Int32Id::Ref param_rhsId) {
+  ops.int32DivResult(param_lhsId, param_rhsId);
+}
+
+void EmitOp_Int32ModResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_Int32Id::Ref param_lhsId, Type_Int32Id::Ref param_rhsId) {
+  ops.int32ModResult(param_lhsId, param_rhsId);
+}
+
+void EmitOp_Int32BitOrResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_Int32Id::Ref param_lhsId, Type_Int32Id::Ref param_rhsId) {
+  ops.int32BitOrResult(param_lhsId, param_rhsId);
+}
+
+void EmitOp_Int32BitXorResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_Int32Id::Ref param_lhsId, Type_Int32Id::Ref param_rhsId) {
+  ops.int32BitXorResult(param_lhsId, param_rhsId);
+}
+
+void EmitOp_Int32BitAndResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_Int32Id::Ref param_lhsId, Type_Int32Id::Ref param_rhsId) {
+  ops.int32BitAndResult(param_lhsId, param_rhsId);
+}
+
+void EmitOp_Int32LeftShiftResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_Int32Id::Ref param_lhsId, Type_Int32Id::Ref param_rhsId) {
+  ops.int32LeftShiftResult(param_lhsId, param_rhsId);
+}
+
+void EmitOp_Int32RightShiftResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_Int32Id::Ref param_lhsId, Type_Int32Id::Ref param_rhsId) {
+  ops.int32RightShiftResult(param_lhsId, param_rhsId);
+}
+
+void EmitOp_Int32URightShiftResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_Int32Id::Ref param_lhsId, Type_Int32Id::Ref param_rhsId, Type_Bool::Ref param_forceDouble) {
+  ops.int32URightShiftResult(param_lhsId, param_rhsId, param_forceDouble);
+}
+
+void EmitOp_CompareNullUndefinedResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_JSOp::Ref param_jsop, Type_Bool::Ref param_isUndefined, Type_ValueId::Ref param_inputId) {
+  ops.compareNullUndefinedResult(param_jsop, param_isUndefined, param_inputId);
+}
+
+void EmitOp_CompareInt32Result(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_JSOp::Ref param_jsop, Type_Int32Id::Ref param_lhsId, Type_Int32Id::Ref param_rhsId) {
+  ops.compareInt32Result(param_jsop, param_lhsId, param_rhsId);
+}
+
 Type_FailurePath::Val Fn_addFailurePathUnchecked(Cachet_ContextRef cx) {
   FailurePath* failurePath;
   // FIXME: use this result in some way
@@ -1567,6 +1806,16 @@ void Fn_releaseScratchReg(Cachet_ContextRef cx) {
 #ifdef DEBUG
   detail::CompilerInternals::debugTrackedRegisters(cx).take(ScratchReg);
 #endif
+}
+
+void Fn_allocateKnownReg(Cachet_ContextRef cx, Type_Reg::Ref param_reg) {
+  detail::CompilerInternals::allocator(cx).allocateFixedRegister(
+    detail::CompilerInternals::masm(cx), param_reg);
+}
+
+void Fn_allocateKnownValueReg(Cachet_ContextRef cx, Type_ValueReg::Ref param_valueReg) {
+  detail::CompilerInternals::allocator(cx).allocateFixedValueRegister(
+    detail::CompilerInternals::masm(cx), param_valueReg);
 }
 
 Type_FloatReg::Val Fn_allocateDoubleScratchReg(Cachet_ContextRef cx) {
@@ -1688,6 +1937,12 @@ Type_String::Val Fn_readStringField(
   return detail::CompilerInternals::stringStubField(cx, param_stringField);
 }
 
+Type_Symbol::Val Fn_readSymbolField(
+    Cachet_ContextRef cx,
+    Type_SymbolField::Ref param_symbolField) {
+  return detail::CompilerInternals::symbolStubField(cx, param_symbolField);
+}
+
 Type_Shape::Val Fn_readShapeField(
     Cachet_ContextRef cx,
     Type_ShapeField::Ref param_shapeField) {
@@ -1710,6 +1965,29 @@ Type_Bool::Val Fn_objectGuardNeedsSpectreMitigations(
     Cachet_ContextRef cx,
     Type_ObjectId::Ref param_objectId) {
   return detail::CompilerInternals::objectGuardNeedsSpectreMitigations(cx, param_objectId);
+}
+
+Type_ValueId::Val Fn_defineInputValueId(Cachet_ContextRef cx, Type_UInt16::Ref param_id) {
+  return Type_ValueId::Val(cx.writer->setInputOperandId(param_id));
+}
+
+Type_Int32Field::Val Fn_writeInt32Field(Cachet_ContextRef cx, Type_Int32::Ref param_int32) {
+  return (Type_Int32Field::Val)cx.writer->addStubField(param_int32, StubField::Type::RawInt32);
+}
+
+Type_StringField::Val Fn_writeStringField(Cachet_ContextRef cx, Type_String::Ref param_string) {
+  return (Type_StringField::Val)cx.writer->addStubField(
+      uintptr_t(param_string.get()), StubField::Type::String);
+}
+
+Type_SymbolField::Val Fn_writeSymbolField(Cachet_ContextRef cx, Type_Symbol::Ref param_symbol) {
+  return (Type_SymbolField::Val)cx.writer->addStubField(
+      uintptr_t(param_symbol.get()), StubField::Type::Symbol);
+}
+
+Type_ShapeField::Val Fn_writeShapeField(Cachet_ContextRef cx, Type_Shape::Ref param_shape) {
+  return (Type_ShapeField::Val)cx.writer->addStubField(
+      uintptr_t(param_shape.get()), StubField::Type::Shape);
 }
 
 };  // namespace Impl_CacheIR

@@ -1,6 +1,550 @@
 import "CacheIR.cachet";
 import "VM.cachet";
 
+enum AttachDecision {
+    NoAction,
+    Attach,
+    TemporarilyUnoptimizable,
+    Deferred,
+}
+
+struct ToPropertyKeyIRGenerator;
+
+impl ToPropertyKeyIRGenerator {
+    var value: Value;
+
+    fn tryAttachInt32() emits CacheIR -> AttachDecision {
+        if !Value::isInt32(ToPropertyKeyIRGenerator::value) {
+            return AttachDecision::NoAction;
+        }
+
+        let valueId = CacheIR::defineInputValueId(0_u16);
+
+        emit CacheIR::GuardToInt32(valueId);
+        let int32Id = OperandId::toInt32Id(valueId);
+
+        emit CacheIR::LoadInt32Result(int32Id);
+        emit CacheIR::ReturnFromIC();
+        AttachDecision::Attach
+    }
+
+    fn tryAttachNumber() emits CacheIR -> AttachDecision {
+        if !Value::isNumber(ToPropertyKeyIRGenerator::value) {
+            return AttachDecision::NoAction;
+        }
+
+        // We allow negative zero here because ToPropertyKey(-0.0) is 0.
+        if (!Float64::equalsInt32(Value::toNumber(ToPropertyKeyIRGenerator::value))) {
+            return AttachDecision::NoAction;
+        }
+
+        let valueId = CacheIR::defineInputValueId(0_u16);
+
+        let int32Id = CacheIR::newInt32Id();
+        emit CacheIR::GuardToInt32Index(valueId, int32Id);
+
+        emit CacheIR::LoadInt32Result(int32Id);
+        emit CacheIR::ReturnFromIC();
+        AttachDecision::Attach
+    }
+
+    fn tryAttachString() emits CacheIR -> AttachDecision {
+        if !Value::isString(ToPropertyKeyIRGenerator::value) {
+            return AttachDecision::NoAction;
+        }
+
+        let valueId = CacheIR::defineInputValueId(0_u16);
+
+        emit CacheIR::GuardToString(valueId);
+        let stringId = OperandId::toStringId(valueId);
+
+        emit CacheIR::LoadStringResult(stringId);
+        emit CacheIR::ReturnFromIC();
+        AttachDecision::Attach
+    }
+
+    fn tryAttachSymbol() emits CacheIR -> AttachDecision {
+        if !Value::isSymbol(ToPropertyKeyIRGenerator::value) {
+            return AttachDecision::NoAction;
+        }
+
+        let valueId = CacheIR::defineInputValueId(0_u16);
+
+        emit CacheIR::GuardToSymbol(valueId);
+        let symbolId = OperandId::toSymbolId(valueId);
+
+        emit CacheIR::LoadSymbolResult(symbolId);
+        emit CacheIR::ReturnFromIC();
+        AttachDecision::Attach
+    }
+}
+
+struct UnaryArithIRGenerator;
+
+impl UnaryArithIRGenerator {
+    var op_: JSOp;
+    var value: Value;
+    var resValue: Value;
+
+    fn tryAttachInt32() emits CacheIR -> AttachDecision {
+        if UnaryArithIRGenerator::op_ == JSOp::BitNot {
+            return AttachDecision::NoAction;
+        }
+
+        if !Value::isInt32(UnaryArithIRGenerator::value) ||
+            !Value::isInt32(UnaryArithIRGenerator::resValue) {
+           return AttachDecision::NoAction;
+        }
+
+        let valueId = CacheIR::defineInputValueId(0_u16);
+
+        emit CacheIR::GuardToInt32(valueId);
+        let int32Id = OperandId::toInt32Id(valueId);
+
+        if UnaryArithIRGenerator::op_ == JSOp::Pos {
+            emit CacheIR::LoadInt32Result(int32Id);
+        } else if UnaryArithIRGenerator::op_ == JSOp::Neg {
+            emit CacheIR::Int32NegationResult(int32Id);
+        } else if UnaryArithIRGenerator::op_ == JSOp::Inc {
+            emit CacheIR::Int32IncResult(int32Id);
+        } else if UnaryArithIRGenerator::op_ == JSOp::Dec {
+            emit CacheIR::Int32DecResult(int32Id);
+        } else if UnaryArithIRGenerator::op_ == JSOp::ToNumeric {
+            emit CacheIR::LoadInt32Result(int32Id);
+        } else {
+            assert false;
+        }
+
+        emit CacheIR::ReturnFromIC();
+        return AttachDecision::Attach;
+    }
+
+    fn tryAttachBitwise() emits CacheIR -> AttachDecision {
+        if UnaryArithIRGenerator::op_ != JSOp::BitNot {
+            return AttachDecision::NoAction;
+        }
+
+        if !canTruncateToInt32(UnaryArithIRGenerator::value) {
+           return AttachDecision::NoAction;
+        }
+
+        let valueId = CacheIR::defineInputValueId(0_u16);
+
+        let int32Id = emitTruncateToInt32Guard(valueId, UnaryArithIRGenerator::value);
+        emit CacheIR::Int32NotResult(int32Id);
+        emit CacheIR::ReturnFromIC();
+        return AttachDecision::Attach;
+    }
+}
+
+struct BinaryArithIRGenerator;
+
+impl BinaryArithIRGenerator {
+    var op_: JSOp;
+    var lhsValue: Value;
+    var rhsValue: Value;
+    var resValue: Value;
+
+    fn tryAttachInt32() emits CacheIR -> AttachDecision {
+        if !(Value::isInt32(BinaryArithIRGenerator::lhsValue) ||
+                    Value::isBool(BinaryArithIRGenerator::lhsValue)) ||
+               !(Value::isInt32(BinaryArithIRGenerator::rhsValue) ||
+                    Value::isBool(BinaryArithIRGenerator::rhsValue)) {
+           return AttachDecision::NoAction;
+        }
+
+        if !Value::isInt32(BinaryArithIRGenerator::resValue) {
+            return AttachDecision::NoAction;
+        }
+
+        if BinaryArithIRGenerator::op_ != JSOp::Add &&
+                BinaryArithIRGenerator::op_ != JSOp::Sub &&
+                BinaryArithIRGenerator::op_ != JSOp::Mul &&
+                BinaryArithIRGenerator::op_ != JSOp::Div &&
+                BinaryArithIRGenerator::op_ != JSOp::Mod {
+            return AttachDecision::NoAction;
+        }
+
+        let lhsValueId = CacheIR::defineInputValueId(0_u16);
+        let rhsValueId = CacheIR::defineInputValueId(1_u16);
+
+        let lhsInt32Id = guardToInt32(lhsValueId, BinaryArithIRGenerator::lhsValue);
+        let rhsInt32Id = guardToInt32(rhsValueId, BinaryArithIRGenerator::rhsValue);
+
+        if BinaryArithIRGenerator::op_ == JSOp::Add {
+            emit CacheIR::Int32AddResult(lhsInt32Id, rhsInt32Id);
+        } else if BinaryArithIRGenerator::op_ == JSOp::Sub {
+            emit CacheIR::Int32SubResult(lhsInt32Id, rhsInt32Id);
+        } else if BinaryArithIRGenerator::op_ == JSOp::Mul {
+            emit CacheIR::Int32MulResult(lhsInt32Id, rhsInt32Id);
+        } else if BinaryArithIRGenerator::op_ == JSOp::Div {
+            emit CacheIR::Int32DivResult(lhsInt32Id, rhsInt32Id);
+        } else if BinaryArithIRGenerator::op_ == JSOp::Mod {
+            emit CacheIR::Int32ModResult(lhsInt32Id, rhsInt32Id);
+        } else {
+            assert false;
+        }
+
+        emit CacheIR::ReturnFromIC();
+        AttachDecision::Attach
+    }
+
+    fn tryAttachBitwise() emits CacheIR -> AttachDecision {
+        // Only bit-wise and shifts.
+        if BinaryArithIRGenerator::op_ != JSOp::BitOr &&
+            BinaryArithIRGenerator::op_ != JSOp::BitXor &&
+            BinaryArithIRGenerator::op_ != JSOp::BitAnd &&
+            BinaryArithIRGenerator::op_ != JSOp::Lsh &&
+            BinaryArithIRGenerator::op_ != JSOp::Rsh &&
+            BinaryArithIRGenerator::op_ != JSOp::Ursh
+        {
+            return AttachDecision::NoAction;
+        }
+
+        // Check guard conditions.
+        if !canTruncateToInt32(BinaryArithIRGenerator::lhsValue) ||
+            !canTruncateToInt32(BinaryArithIRGenerator::rhsValue)
+        {
+            return AttachDecision::NoAction;
+        }
+
+        let lhsValueId = CacheIR::defineInputValueId(0_u16);
+        let rhsValueId = CacheIR::defineInputValueId(1_u16);
+
+        let lhsInt32Id = emitTruncateToInt32Guard(lhsValueId, BinaryArithIRGenerator::lhsValue);
+        let rhsInt32Id = emitTruncateToInt32Guard(rhsValueId, BinaryArithIRGenerator::rhsValue);
+
+        if BinaryArithIRGenerator::op_ == JSOp::BitOr {
+            emit CacheIR::Int32BitOrResult(lhsInt32Id, rhsInt32Id);
+        } else if BinaryArithIRGenerator::op_ == JSOp::BitXor {
+            emit CacheIR::Int32BitXorResult(lhsInt32Id, rhsInt32Id);
+        } else if BinaryArithIRGenerator::op_ == JSOp::BitAnd {
+            emit CacheIR::Int32BitAndResult(lhsInt32Id, rhsInt32Id);
+        } else if BinaryArithIRGenerator::op_ == JSOp::Lsh {
+            emit CacheIR::Int32LeftShiftResult(lhsInt32Id, rhsInt32Id);
+        } else if BinaryArithIRGenerator::op_ == JSOp::Rsh {
+            emit CacheIR::Int32RightShiftResult(lhsInt32Id, rhsInt32Id);
+        } else if BinaryArithIRGenerator::op_ == JSOp::Ursh {
+            emit CacheIR::Int32URightShiftResult(lhsInt32Id, rhsInt32Id,
+                Value::isDouble(BinaryArithIRGenerator::resValue));
+        } else {
+            assert false;
+        }
+
+        emit CacheIR::ReturnFromIC();
+        AttachDecision::Attach
+    }
+}
+
+struct CompareIRGenerator;
+
+impl CompareIRGenerator {
+    var op_: JSOp;
+    var lhsValue: Value;
+    var rhsValue: Value;
+
+    fn tryAttachAnyNullUndefined(
+        lhsValueId: ValueId,
+        rhsValueId: ValueId,
+    ) emits CacheIR -> AttachDecision {
+        // Either RHS or LHS needs to be null/undefined.
+        if !Value::isNullOrUndefined(CompareIRGenerator::lhsValue) &&
+            !Value::isNullOrUndefined(CompareIRGenerator::rhsValue)
+        {
+            return AttachDecision::NoAction;
+        }
+
+        // We assume that the side with null/undefined is usually constant, in
+        // code like `if (x === undefined) { x = {}; }`.
+        // That is why we don't attach when both sides are undefined/null,
+        // because we would basically need to decide by chance which side is
+        // the likely constant.
+        // The actual generated code however handles null/undefined of course.
+        if Value::isNullOrUndefined(CompareIRGenerator::lhsValue) &&
+            Value::isNullOrUndefined(CompareIRGenerator::rhsValue)
+        {
+            return AttachDecision::NoAction;
+        }
+
+        if Value::isNullOrUndefined(CompareIRGenerator::rhsValue) {
+            if Value::isNull(CompareIRGenerator::rhsValue) {
+                emit CacheIR::GuardIsNull(rhsValueId);
+                emit CacheIR::CompareNullUndefinedResult(CompareIRGenerator::op_, false, 
+                    lhsValueId);
+            } else {
+                emit CacheIR::GuardIsUndefined(rhsValueId);
+                emit CacheIR::CompareNullUndefinedResult(CompareIRGenerator::op_, true,
+                    lhsValueId);
+            }
+        } else {
+            if Value::isNull(CompareIRGenerator::lhsValue) {
+                emit CacheIR::GuardIsNull(lhsValueId);
+                emit CacheIR::CompareNullUndefinedResult(CompareIRGenerator::op_, false,
+                    rhsValueId);
+            } else {
+                emit CacheIR::GuardIsUndefined(lhsValueId);
+                emit CacheIR::CompareNullUndefinedResult(CompareIRGenerator::op_, true,
+                    rhsValueId);
+            }
+        }
+
+        emit CacheIR::ReturnFromIC();
+        AttachDecision::Attach
+    }
+
+    fn tryAttachInt32(
+        lhsValueId: ValueId,
+        rhsValueId: ValueId,
+    ) emits CacheIR -> AttachDecision {
+        if !(Value::isInt32(CompareIRGenerator::lhsValue) ||
+                    Value::isBool(CompareIRGenerator::lhsValue)) ||
+               !(Value::isInt32(CompareIRGenerator::rhsValue) ||
+                    Value::isBool(CompareIRGenerator::rhsValue)) {
+           return AttachDecision::NoAction;
+        }
+
+        let lhsInt32Id = guardToInt32(lhsValueId, CompareIRGenerator::lhsValue);
+        let rhsInt32Id = guardToInt32(rhsValueId, CompareIRGenerator::rhsValue);
+
+        emit CacheIR::CompareInt32Result(CompareIRGenerator::op_, lhsInt32Id, rhsInt32Id);
+        emit CacheIR::ReturnFromIC();
+        AttachDecision::Attach
+    }
+
+    fn tryAttachStrictDifferentTypes(
+        lhsValueId: ValueId,
+        rhsValueId: ValueId,
+    ) emits CacheIR -> AttachDecision {
+        if CompareIRGenerator::op_ != JSOp::StrictEq &&
+            CompareIRGenerator::op_ != JSOp::StrictNe
+        {
+            return AttachDecision::NoAction;
+        }
+
+        // Probably can't hit some of these.
+        if Value::isSameType(CompareIRGenerator::lhsValue, CompareIRGenerator::rhsValue) ||
+            (Value::isNumber(CompareIRGenerator::lhsValue) &&
+                Value::isNumber(CompareIRGenerator::rhsValue))
+        {
+            return AttachDecision::NoAction;
+        }
+
+        // Compare tags
+        let lhsValueTagId = CacheIR::newValueTagId();
+        let rhsValueTagId = CacheIR::newValueTagId();
+        emit CacheIR::LoadValueTag(lhsValueId, lhsValueTagId);
+        emit CacheIR::LoadValueTag(rhsValueId, rhsValueTagId);
+        emit CacheIR::GuardTagNotEqual(lhsValueTagId, rhsValueTagId);
+
+        // Now that we've passed the guard, we know differing types, so return the
+        // bool result.
+        emit CacheIR::LoadBooleanResult(CompareIRGenerator::op_ == JSOp::StrictNe);
+        emit CacheIR::ReturnFromIC();
+        AttachDecision::Attach
+    }
+}
+
+struct GetPropIRGenerator;
+
+impl GetPropIRGenerator {
+    fn tryAttachArgumentsObjectArg(
+        object: Object,
+        objectId: ObjectId,
+        index: UInt32,
+        indexInt32Id: Int32Id,
+    ) emits CacheIR -> AttachDecision {
+        if !Object::isArgumentsObject(object) {
+            return AttachDecision::NoAction;
+        }
+        let argumentsObject = Object::toArgumentsObject(object);
+
+        // No elements must have been overridden or deleted.
+        if ArgumentsObject::hasOverriddenElement(argumentsObject) {
+            return AttachDecision::NoAction;
+        }
+
+        // Check bounds.
+        if index >= ArgumentsObject::getInitialLength(argumentsObject) {
+            return AttachDecision::NoAction;
+        }
+
+        // And finally also check that the argument isn't forwarded.
+        if ArgumentsObject::argIsForwarded(argumentsObject, index) {
+            return AttachDecision::NoAction;
+        }
+
+        if Object::isMappedArgumentsObject(argumentsObject) {
+            emit CacheIR::GuardClass(objectId, GuardClassKind::MappedArguments);
+        } else {
+            assert Object::isUnmappedArgumentsObject(argumentsObject);
+            emit CacheIR::GuardClass(objectId, GuardClassKind::UnmappedArguments);
+        }
+
+        emit CacheIR::LoadArgumentsObjectArgResult(objectId, indexInt32Id);
+        emit CacheIR::ReturnFromIC();
+        AttachDecision::Attach
+    }
+
+    fn tryAttachObjectLength(
+        object: Object,
+        objectId: ObjectId,
+        key: PropertyKey,
+    ) emits CacheIR -> AttachDecision {
+        if !PropertyKey::isAtom(key, AtomState::length) {
+            return AttachDecision::NoAction;
+        }
+
+        if Object::isArrayObject(object) {
+            let arrayObject = Object::toArrayObject(object);
+            if ArrayObject::length(arrayObject) > Int32::maximum as UInt32 {
+                return AttachDecision::NoAction;
+            }
+
+            emit CacheIR::GuardClass(objectId, GuardClassKind::Array);
+            emit CacheIR::LoadInt32ArrayLengthResult(objectId);
+            emit CacheIR::ReturnFromIC();
+            return AttachDecision::Attach;
+        } else if Object::isArgumentsObject(object) {
+            let argumentsObject = Object::toArgumentsObject(object);
+            if ArgumentsObject::hasOverriddenLength(argumentsObject) {
+                return AttachDecision::NoAction;
+            }
+
+            if Object::isMappedArgumentsObject(object) {
+                emit CacheIR::GuardClass(objectId, GuardClassKind::MappedArguments);
+            } else {
+                assert Object::isUnmappedArgumentsObject(object);
+                emit CacheIR::GuardClass(objectId, GuardClassKind::UnmappedArguments);
+            }
+
+            emit CacheIR::LoadArgumentsObjectLengthResult(objectId);
+            emit CacheIR::ReturnFromIC();
+            return AttachDecision::Attach;
+        }
+
+        AttachDecision::NoAction
+    }
+
+    fn tryAttachNativeFixed(
+        object: Object,
+        objectId: ObjectId,
+        key: PropertyKey,
+    ) emits CacheIR -> AttachDecision {
+        let kind = canAttachNativeGetProp(object, key, out let holder, out let propInfo);
+        if kind == NativeGetPropKind::Slot {
+           let nativeObject = Object::toNativeObject(object);
+           let holder = MaybeNativeObject::toNativeObject(holder);
+           let propInfo = MaybePropertyInfo::toPropertyInfo(propInfo);
+           let slot = PropertyInfo::slot(propInfo);
+
+           if nativeObject == holder && NativeObject::hasFixedSlot(nativeObject, slot) {
+               let shape = Object::shapeOf(nativeObject);
+               let shapeField = CacheIR::writeShapeField(shape);
+               emit CacheIR::GuardShape(objectId, shapeField);
+
+               let offset = NativeObject::offsetOfFixedSlot(slot);
+               let offsetField = CacheIR::writeInt32Field(offset as Int32);
+               emit CacheIR::LoadFixedSlotResult(objectId, offsetField);
+               emit CacheIR::ReturnFromIC();
+               return AttachDecision::Attach;
+           }
+        }
+
+        AttachDecision::NoAction
+    }
+
+    fn tryAttachNativeDynamic(
+        object: Object,
+        objectId: ObjectId,
+        key: PropertyKey,
+    ) emits CacheIR -> AttachDecision {
+        let kind = canAttachNativeGetProp(object, key, out let holder, out let propInfo);
+        if kind == NativeGetPropKind::Slot {
+           let nativeObject = Object::toNativeObject(object);
+           let holder = MaybeNativeObject::toNativeObject(holder);
+           let propInfo = MaybePropertyInfo::toPropertyInfo(propInfo);
+           let slot = PropertyInfo::slot(propInfo);
+
+           if nativeObject == holder && NativeObject::hasDynamicSlot(nativeObject, slot) {
+               let shape = Object::shapeOf(nativeObject);
+               let shapeField = CacheIR::writeShapeField(shape);
+               emit CacheIR::GuardShape(objectId, shapeField);
+
+               let offset = NativeObjectSlots::offsetOfSlot(
+                   slot - NativeObject::numFixedSlots(nativeObject)
+               );
+               let offsetField = CacheIR::writeInt32Field(offset as Int32);
+               emit CacheIR::LoadDynamicSlotResult(objectId, offsetField);
+               emit CacheIR::ReturnFromIC();
+               return AttachDecision::Attach;
+           }
+        }
+
+        AttachDecision::NoAction
+    }
+}
+
+struct GetElemIRGenerator;
+
+impl GetElemIRGenerator {
+    var keyValue: Value;
+    var keyValueId: ValueId;
+
+    fn tryAttachNativeFixed(
+        object: Object,
+        objectId: ObjectId,
+        key: PropertyKey,
+    ) emits CacheIR -> AttachDecision {
+        let kind = canAttachNativeGetProp(object, key, out let holder, out let propInfo);
+        if kind == NativeGetPropKind::Slot {
+           let nativeObject = Object::toNativeObject(object);
+           let holder = MaybeNativeObject::toNativeObject(holder);
+           let propInfo = MaybePropertyInfo::toPropertyInfo(propInfo);
+           let slot = PropertyInfo::slot(propInfo);
+
+           if nativeObject == holder && NativeObject::hasFixedSlot(nativeObject, slot) {
+               emitIdGuard(GetElemIRGenerator::keyValueId, GetElemIRGenerator::keyValue, key);
+
+               let shape = Object::shapeOf(nativeObject);
+               let shapeField = CacheIR::writeShapeField(shape);
+               emit CacheIR::GuardShape(objectId, shapeField);
+
+               let offset = NativeObject::offsetOfFixedSlot(slot);
+               let offsetField = CacheIR::writeInt32Field(offset as Int32);
+               emit CacheIR::LoadFixedSlotResult(objectId, offsetField);
+               emit CacheIR::ReturnFromIC();
+               return AttachDecision::Attach;
+           }
+        }
+
+        AttachDecision::NoAction
+    }
+
+    fn tryAttachDenseElement(
+        object: Object,
+        objectId: ObjectId,
+        index: UInt32,
+        indexInt32Id: Int32Id,
+    ) emits CacheIR -> AttachDecision {
+        if !Object::isNativeObject(object) {
+            return AttachDecision::NoAction;
+        }
+
+        let nativeObject = Object::toNativeObject(object);
+        if !NativeObject::containsDenseElement(nativeObject, index) {
+            return AttachDecision::NoAction;
+        }
+
+        let shape = Object::shapeOf(object);
+        let shapeField = CacheIR::writeShapeField(shape);
+        emit CacheIR::GuardShape(objectId, shapeField);
+
+        emit CacheIR::LoadDenseElementResult(objectId, indexInt32Id);
+        emit CacheIR::ReturnFromIC();
+        AttachDecision::Attach
+    }
+}
+
 enum NativeGetPropKind {
     None,
     Slot,
@@ -41,4 +585,93 @@ fn isCacheableProtoChain(object: NativeObject, holder: NativeObject) -> Bool;
 fn isCacheableGetPropSlot(object: NativeObject, holder: NativeObject, prop: PropertyInfo) -> Bool {
     assert isCacheableProtoChain(object, holder);
     PropertyInfo::isDataProperty(prop)
+}
+
+fn canTruncateToInt32(value: Value) -> Bool {
+    Value::isInt32(value) || //Value::isNumber(value) ||
+      Value::isBool(value) ||
+      Value::isNullOrUndefined(value) // ||
+      //Value::isString(value)
+}
+
+fn emitTruncateToInt32Guard(valueId: ValueId, value: Value) emits CacheIR -> Int32Id {
+    assert canTruncateToInt32(value);
+
+    if Value::isInt32(value) {
+        emit CacheIR::GuardToInt32(valueId);
+        return OperandId::toInt32Id(valueId);
+    } else if Value::isBool(value) {
+        let int32Id = CacheIR::newInt32Id();
+        emit CacheIR::GuardBooleanToInt32(valueId, int32Id);
+        return int32Id;
+    } else if Value::isNullOrUndefined(value) {
+        emit CacheIR::GuardIsNullOrUndefined(valueId);
+
+        let zeroField = CacheIR::writeInt32Field(0_i32);
+        let int32Id = CacheIR::newInt32Id();
+        emit CacheIR::LoadInt32Constant(zeroField, int32Id);
+        return int32Id;
+    } else {
+//        let numberId: NumberId;
+//
+//        if Value::isString(value) {
+//            emit CacheIR::GuardToString(valueId);
+//            let stringId = OperandId::toStringId(valueId);
+//
+//            emit CacheIR::GuardStringToNumber(stringId);
+//            numberId = OperandId::toNumberId(stringId);
+//        } else {
+//            assert Value::isDouble(value);
+//            
+//            emit CacheIR::GuardIsNumber(valueId);
+//            numberId = OperandId::toNumberId(valueId);
+//        }
+
+        assert false;
+        return OperandId::toInt32Id(valueId);
+    }
+}
+
+fn guardToInt32(valueId: ValueId, value: Value) emits CacheIR -> Int32Id {
+    if Value::isInt32(value) {
+        emit CacheIR::GuardToInt32(valueId);
+        return OperandId::toInt32Id(valueId);
+    }
+
+    assert Value::isBool(value);
+
+    let int32Id = CacheIR::newInt32Id();
+    emit CacheIR::GuardBooleanToInt32(valueId, int32Id);
+    return int32Id;
+}
+
+fn emitIdGuard(keyValueId: ValueId, keyValue: Value, key: PropertyKey) emits CacheIR {
+    if PropertyKey::isSymbol(key) {
+        let symbol = PropertyKey::toSymbol(key);
+        assert Value::toSymbol(keyValue) == symbol;
+
+        emit CacheIR::GuardToSymbol(keyValueId);
+        let symbolId = OperandId::toSymbolId(keyValueId);
+
+        let symbolField = CacheIR::writeSymbolField(symbol);
+        emit CacheIR::GuardSpecificSymbol(symbolId, symbolField);
+    } else {
+        assert PropertyKey::isString(key);
+
+        if Value::isUndefined(keyValue) {
+            assert PropertyKey::isAtom(key, AtomState::undefined);
+            emit CacheIR::GuardIsUndefined(keyValueId);
+        } else if Value::isNull(keyValue) {
+            assert PropertyKey::isAtom(key, AtomState::null);
+            emit CacheIR::GuardIsNull(keyValueId);
+        } else {
+            assert Value::isString(keyValue);
+
+            emit CacheIR::GuardToString(keyValueId);
+            let stringId = OperandId::toStringId(keyValueId);
+
+            let stringField = CacheIR::writeStringField(PropertyKey::toAtom(key));
+            emit CacheIR::GuardSpecificAtom(stringId, stringField);
+        }
+    }
 }
