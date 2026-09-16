@@ -813,6 +813,12 @@ ir MASM {
         }
     }
 
+    op StoreValueAddress(valueReg: ValueReg, address: Address) {
+        let value = MASM::getValue(valueReg);
+        let data = RegData::fromValue(value);
+        RegData::writeData(MASM::getData(address.base), address.offset, data);
+    }
+
     op StoreBool(bool: Bool, reg: Reg) {
         MASM::setBool(reg, bool);
     }

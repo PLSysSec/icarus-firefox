@@ -225,6 +225,19 @@ impl RegData {
     unsafe fn toStackIndexUnchecked(data: RegData) -> UInt64;
 
     #[spec]
+    fn writeData(base: RegData, offset: Int64, data: RegData) {
+        if RegData::isUnboxedValue(base) {
+            let value = RegData::toUnboxedValue(base);
+            Value::writeData(value, offset, data);
+        } else if RegData::isNativeObjectSlots(base) {
+            let slots = RegData::toNativeObjectSlots(base);
+            NativeObjectSlots::writeData(slots, offset, data);
+        } else {
+            assert false;
+        }
+    }
+
+    #[spec]
     fn readData(data: RegData, offset: Int64) -> RegData {
         if RegData::isUnboxedValue(data) {
             let value = RegData::toUnboxedValue(data);
@@ -618,6 +631,12 @@ impl Value {
     unsafe fn toBigIntUnchecked(value: Value) -> BigInt;
 
     #[spec]
+    fn writeData(value: Value, offset: Int64, data: RegData) {
+        assert Value::isObject(value);
+        Object::writeData(Value::toObject(value), offset, data);
+    }
+
+    #[spec]
     fn readData(value: Value, offset: Int64) -> RegData {
         if Value::isObject(value) {
             let object = Value::toObject(value);
@@ -723,6 +742,12 @@ impl Object {
         out holder: MaybeNativeObject,
         out propInfo: PropertyResult,
     ) -> Bool;
+
+    #[spec]
+    fn writeData(object: Object, offset: Int64, data: RegData) {
+        assert Object::isNativeObject(object);
+        NativeObject::writeData(Object::toNativeObject(object), offset, data);
+    }
 
     // read RegData at the specified memory offset of the Object
     #[spec]
@@ -864,6 +889,39 @@ impl NativeObject {
     fn containsDenseElement(nativeObject: NativeObject, index: UInt32) -> Bool;
 
     #[spec]
+    fn setFixedSlot(nativeObject: NativeObject, slot: UInt32, value: Value) {
+        assert NativeObject::hasFixedSlot(nativeObject, slot);
+        let shape = Object::shapeOf(nativeObject);
+
+        heap = (unsafe { NativeObject::setFixedSlotUnchecked(heap, nativeObject, slot, value) });
+
+        // Frame: a slot store doesn't change the object's shape.
+        assume Object::shapeOf(nativeObject) == shape;
+        // The store landed.
+        assume NativeObject::getFixedSlot(nativeObject, slot) == value;
+    }
+
+    #[spec]
+    unsafe fn setFixedSlotUnchecked(
+        heap: Heap, nativeObject: NativeObject, slot: UInt32, value: Value
+    ) -> Heap;
+
+    #[spec]
+    fn writeData(nativeObject: NativeObject, offset: Int64, data: RegData) {
+        // this is the only thing in the `writeData` spec that currently does not 
+        // mirror `readData` exactly. This is because we don't need to model anything
+        // but a fixed-slot store at the moment - so this mirrors the `offset >= NativeObject::offsetOfFixedSlots as Int64` 
+        // branch of `readData` 
+
+        assert offset >= NativeObject::offsetOfFixedSlots as Int64;
+        let slotOffset = offset as UInt64 - NativeObject::sizeOf;
+        assert slotOffset % Value::sizeOf == 0_u64;
+        assert slotOffset / Value::sizeOf < Shape::fixedSlotLimit;
+        let slot = (slotOffset / Value::sizeOf) as UInt32;
+        NativeObject::setFixedSlot(nativeObject, slot, RegData::toValue(data));
+    }
+
+    #[spec]
     fn readData(nativeObject: NativeObject, offset: Int64) -> RegData {
         if offset == NativeObject::offsetOfSlots as Int64 {
             // dynamic slots array
@@ -904,6 +962,25 @@ impl NativeObjectSlots {
 
     unsafe fn getDynamicSlotUnchecked(heap: Heap, slots: NativeObjectSlots, slot: UInt32) ->
     Value;
+
+    #[spec]
+    fn setDynamicSlot(slots: NativeObjectSlots, slot: UInt32, value: Value) {
+        assert slot < NativeObjectSlots::length(slots);
+        heap = (unsafe { NativeObjectSlots::setDynamicSlotUnchecked(heap, slots, slot, value) });
+        assume NativeObjectSlots::getDynamicSlot(slots, slot) == value;
+    }
+
+    #[spec]
+    unsafe fn setDynamicSlotUnchecked(
+        heap: Heap, slots: NativeObjectSlots, slot: UInt32, value: Value
+    ) -> Heap;
+
+    #[spec]
+    fn writeData(slots: NativeObjectSlots, offset: Int64, data: RegData) {
+        assert offset % Value::sizeOf as Int64 == 0_i64;
+        let slot = (offset / Value::sizeOf as Int64) as UInt32;
+        NativeObjectSlots::setDynamicSlot(slots, slot, RegData::toValue(data));
+    }
 
     #[spec]
     fn readData(slots: NativeObjectSlots, offset: Int64) -> RegData {
