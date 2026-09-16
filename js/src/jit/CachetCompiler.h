@@ -109,6 +109,11 @@ class CompilerInternals {
     return cx.compiler->valueStubField(offset);
   }
 
+  static void emitPostBarrierSlot(Cachet_ContextRef cx, Register obj,
+                                  ValueOperand val, Register scratch) {
+    cx.compiler->emitPostBarrierSlot(obj, val, scratch);
+  }
+
   static JSString* stringStubField(Cachet_ContextRef cx, uint32_t offset) {
     return cx.compiler->stringStubField(offset);
   }

@@ -1029,8 +1029,14 @@ ir CacheIR emits MASM {
         let objectReg = CacheIR::useObjectId(objectId);
         let slotOffset = CacheIR::readInt32Field(slotField);
         let rhsReg = CacheIR::useValueId(rhsId);
+        let scratchReg = CacheIR::allocateReg();
 
-        emit MASM::StoreValueAddress(rhsReg, Address::new(objectReg, slotOffset));
+        let slot = Address::new(objectReg, slotOffset);
+        emit MASM::PreBarrierAddress(slot, MIRType::Value);
+        emit MASM::StoreValueAddress(rhsReg, slot);
+        emit MASM::PostBarrierSlot(objectReg, rhsReg, scratchReg);
+
+        CacheIR::releaseReg(scratchReg);
     }
 
     op StoreDynamicSlot(objectId: ObjectId, slotField: Int32Field, rhsId: ValueId) {
@@ -1042,7 +1048,10 @@ ir CacheIR emits MASM {
         emit MASM::LoadPtrAddress(
             Address::new(objectReg, NativeObject::offsetOfSlots as Int32), scratchReg
         );
-        emit MASM::StoreValueAddress(rhsReg, Address::new(scratchReg, slotOffset));
+        let slot = Address::new(scratchReg, slotOffset);
+        emit MASM::PreBarrierAddress(slot, MIRType::Value);
+        emit MASM::StoreValueAddress(rhsReg, slot);
+        emit MASM::PostBarrierSlot(objectReg, rhsReg, scratchReg);
 
         CacheIR::releaseReg(scratchReg);
     }

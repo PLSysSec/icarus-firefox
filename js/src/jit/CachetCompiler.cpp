@@ -9,6 +9,7 @@
 #include "mozilla/FloatingPoint.h"
 
 #include "jit/CacheIRCompiler.h"
+#include "jit/SharedICHelpers.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/JSObject.h"
 
@@ -1019,6 +1020,27 @@ void EmitOp_LoadPtrAddress(Cachet_ContextRef cx, IR_MASM::OpsRef ops,
                            Type_Address::Ref param_address,
                            Type_Reg::Ref param_dstReg) {
   ops.loadPtr(param_address, param_dstReg);
+}
+
+void EmitOp_StoreValueAddress(Cachet_ContextRef cx, IR_MASM::OpsRef ops,
+                              Type_ValueReg::Ref param_valueReg,
+                              Type_Address::Ref param_address) {
+  ops.storeValue(param_valueReg, param_address);
+}
+
+void EmitOp_PreBarrierAddress(Cachet_ContextRef cx, IR_MASM::OpsRef ops,
+                              Type_Address::Ref param_address,
+                              Type_MIRType::Ref param_mirType) {
+  EmitPreBarrier(ops, param_address, param_mirType);
+}
+
+void EmitOp_PostBarrierSlot(Cachet_ContextRef cx, IR_MASM::OpsRef ops,
+                            Type_Reg::Ref param_objectReg,
+                            Type_ValueReg::Ref param_valueReg,
+                            Type_Reg::Ref param_scratchReg) {
+  detail::CompilerInternals::emitPostBarrierSlot(cx, param_objectReg,
+                                                 param_valueReg,
+                                                 param_scratchReg);
 }
 
 void EmitOp_PushFloatReg(Cachet_ContextRef cx, IR_MASM::OpsRef ops,
