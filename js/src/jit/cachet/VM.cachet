@@ -680,6 +680,8 @@ impl Object {
         (unsafe { object as ArgumentsObject })
     }
 
+    fn isGlobalLexicalEnvironmentObject(object: Object) -> Bool;
+
     fn getFixedSlot(object: Object, slot: UInt32) -> Value {
         let nativeObject = Object::toNativeObject(object);
         NativeObject::getFixedSlot(nativeObject, slot)
@@ -827,6 +829,30 @@ impl NativeObject {
     }
 
     unsafe fn getSlotsUnchecked(heap: Heap, nativeObject: NativeObject) -> NativeObjectSlots;
+
+    fn getSlot(nativeObject: NativeObject, slot: UInt32) -> Value {
+        assert NativeObject::hasSlot(nativeObject, slot);
+        if NativeObject::hasFixedSlot(nativeObject, slot) {
+            return NativeObject::getFixedSlot(nativeObject, slot);
+        }
+        let slots = NativeObject::getSlots(nativeObject);
+        NativeObjectSlots::getDynamicSlot(slots, slot - NativeObject::numFixedSlots(nativeObject))
+    }
+
+    fn lookupPure(nativeObject: NativeObject, key: PropertyKey) -> MaybePropertyInfo {
+        let maybeProp = (unsafe { NativeObject::lookupPureUnchecked(nativeObject, key) });
+
+        if MaybePropertyInfo::isPropertyInfo(maybeProp) {
+            let prop = MaybePropertyInfo::toPropertyInfo(maybeProp);
+            if PropertyInfo::hasSlot(prop) {
+                assume NativeObject::hasSlot(nativeObject, PropertyInfo::slot(prop));
+            }
+        }
+
+        maybeProp
+    }
+
+    unsafe fn lookupPureUnchecked(nativeObject: NativeObject, key: PropertyKey) -> MaybePropertyInfo;
 
     fn getElementsHeader(nativeObject: NativeObject) -> NativeObjectElements {
         (unsafe { NativeObject::getElementsHeaderUnchecked(heap, nativeObject) } )
@@ -1161,6 +1187,10 @@ impl PropertyFlags {
     fn isAccessorProperty(flags: PropertyFlags) -> Bool;
     fn isCustomDataProperty(flags: PropertyFlags) -> Bool;
 
+    fn configurable(flags: PropertyFlags) -> Bool;
+    fn enumerable(flags: PropertyFlags) -> Bool;
+    fn writable(flags: PropertyFlags) -> Bool;
+
     fn isDataProperty(flags: PropertyFlags) -> Bool {
         !PropertyFlags::isAccessorProperty(flags) && !PropertyFlags::isCustomDataProperty(flags)
     }
@@ -1177,6 +1207,18 @@ impl PropertyInfo {
 
     fn isCustomDataProperty(info: PropertyInfo) -> Bool {
         PropertyFlags::isCustomDataProperty(PropertyInfo::flags(info))
+    }
+
+    fn configurable(info: PropertyInfo) -> Bool {
+        PropertyFlags::configurable(PropertyInfo::flags(info))
+    }
+
+    fn enumerable(info: PropertyInfo) -> Bool {
+        PropertyFlags::enumerable(PropertyInfo::flags(info))
+    }
+
+    fn writable(info: PropertyInfo) -> Bool {
+        PropertyFlags::writable(PropertyInfo::flags(info))
     }
 
     fn hasSlot(info: PropertyInfo) -> Bool {

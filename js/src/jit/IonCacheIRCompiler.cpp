@@ -1003,6 +1003,11 @@ bool IonCacheIRCompiler::emitStoreFixedSlot(ObjOperandId objId,
                                             uint32_t offsetOffset,
                                             ValOperandId rhsId) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+#ifdef JS_CACHET
+  if (isCachetEnabled_) {
+    cachet::Impl_CacheIR::Op_StoreFixedSlot(cachet::CachetContext {this, cx_}, masm, objId, offsetOffset, rhsId);
+  } else {
+#endif
   Register obj = allocator.useRegister(masm, objId);
   int32_t offset = int32StubField(offsetOffset);
   ConstantOrRegister val = allocator.useConstantOrRegister(masm, rhsId);
@@ -1012,6 +1017,9 @@ bool IonCacheIRCompiler::emitStoreFixedSlot(ObjOperandId objId,
   EmitPreBarrier(masm, slot, MIRType::Value);
   masm.storeConstantOrRegister(val, slot);
   emitPostBarrierSlot(obj, val, scratch);
+#ifdef JS_CACHET
+  }
+#endif
   return true;
 }
 
@@ -1019,6 +1027,11 @@ bool IonCacheIRCompiler::emitStoreDynamicSlot(ObjOperandId objId,
                                               uint32_t offsetOffset,
                                               ValOperandId rhsId) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+#ifdef JS_CACHET
+  if (isCachetEnabled_) {
+    cachet::Impl_CacheIR::Op_StoreDynamicSlot(cachet::CachetContext {this, cx_}, masm, objId, offsetOffset, rhsId);
+  } else {
+#endif
   Register obj = allocator.useRegister(masm, objId);
   int32_t offset = int32StubField(offsetOffset);
   ConstantOrRegister val = allocator.useConstantOrRegister(masm, rhsId);
@@ -1029,6 +1042,9 @@ bool IonCacheIRCompiler::emitStoreDynamicSlot(ObjOperandId objId,
   EmitPreBarrier(masm, slot, MIRType::Value);
   masm.storeConstantOrRegister(val, slot);
   emitPostBarrierSlot(obj, val, scratch);
+#ifdef JS_CACHET
+  }
+#endif
   return true;
 }
 

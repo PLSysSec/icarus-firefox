@@ -464,6 +464,34 @@ inline Type_ValueId::Ref Var_keyValueId(Cachet_ContextRef cx) {
 
 };  // namespace Impl_GetElemIRGenerator
 
+namespace Impl_SetPropIRGenerator {
+
+inline Type_JSOp::Ref Var_op_(Cachet_ContextRef cx) {
+  return JSOp(*static_cast<SetPropIRGenerator*>(cx.generator)->pc_);
+}
+
+inline Type_Value::Ref Var_idValue(Cachet_ContextRef cx) {
+  return static_cast<SetPropIRGenerator*>(cx.generator)->idVal_;
+}
+
+};  // namespace Impl_SetPropIRGenerator
+
+namespace Impl_SetElemIRGenerator {
+
+inline Type_JSOp::Ref Var_op_(Cachet_ContextRef cx) {
+  return JSOp(*static_cast<SetPropIRGenerator*>(cx.generator)->pc_);
+}
+
+inline Type_Value::Ref Var_keyValue(Cachet_ContextRef cx) {
+  return static_cast<SetPropIRGenerator*>(cx.generator)->idVal_;
+}
+
+inline Type_ValueId::Ref Var_keyValueId(Cachet_ContextRef cx) {
+  return static_cast<SetPropIRGenerator*>(cx.generator)->setElemKeyValueId();
+}
+
+};  // namespace Impl_SetElemIRGenerator
+
 namespace Impl_MIRType {
 
 inline Type_MIRType::Ref Variant_Undefined(Cachet_ContextRef cx) {
@@ -768,6 +796,86 @@ inline Type_JSOp::Ref Variant_Div(Cachet_ContextRef cx) {
 
 inline Type_JSOp::Ref Variant_Mod(Cachet_ContextRef cx) {
   return JSOp::Mod;
+}
+
+inline Type_JSOp::Ref Variant_InitProp(Cachet_ContextRef cx) {
+  return JSOp::InitProp;
+}
+
+inline Type_JSOp::Ref Variant_InitHiddenProp(Cachet_ContextRef cx) {
+  return JSOp::InitHiddenProp;
+}
+
+inline Type_JSOp::Ref Variant_InitLockedProp(Cachet_ContextRef cx) {
+  return JSOp::InitLockedProp;
+}
+
+inline Type_JSOp::Ref Variant_InitElem(Cachet_ContextRef cx) {
+  return JSOp::InitElem;
+}
+
+inline Type_JSOp::Ref Variant_InitHiddenElem(Cachet_ContextRef cx) {
+  return JSOp::InitHiddenElem;
+}
+
+inline Type_JSOp::Ref Variant_InitLockedElem(Cachet_ContextRef cx) {
+  return JSOp::InitLockedElem;
+}
+
+inline Type_JSOp::Ref Variant_InitPropGetter(Cachet_ContextRef cx) {
+  return JSOp::InitPropGetter;
+}
+
+inline Type_JSOp::Ref Variant_InitHiddenPropGetter(Cachet_ContextRef cx) {
+  return JSOp::InitHiddenPropGetter;
+}
+
+inline Type_JSOp::Ref Variant_InitElemGetter(Cachet_ContextRef cx) {
+  return JSOp::InitElemGetter;
+}
+
+inline Type_JSOp::Ref Variant_InitHiddenElemGetter(Cachet_ContextRef cx) {
+  return JSOp::InitHiddenElemGetter;
+}
+
+inline Type_JSOp::Ref Variant_InitPropSetter(Cachet_ContextRef cx) {
+  return JSOp::InitPropSetter;
+}
+
+inline Type_JSOp::Ref Variant_InitHiddenPropSetter(Cachet_ContextRef cx) {
+  return JSOp::InitHiddenPropSetter;
+}
+
+inline Type_JSOp::Ref Variant_InitElemSetter(Cachet_ContextRef cx) {
+  return JSOp::InitElemSetter;
+}
+
+inline Type_JSOp::Ref Variant_InitHiddenElemSetter(Cachet_ContextRef cx) {
+  return JSOp::InitHiddenElemSetter;
+}
+
+inline Type_JSOp::Ref Variant_InitElemArray(Cachet_ContextRef cx) {
+  return JSOp::InitElemArray;
+}
+
+inline Type_JSOp::Ref Variant_InitElemInc(Cachet_ContextRef cx) {
+  return JSOp::InitElemInc;
+}
+
+inline Type_JSOp::Ref Variant_InitGLexical(Cachet_ContextRef cx) {
+  return JSOp::InitGLexical;
+}
+
+inline Type_JSOp::Ref Variant_InitAliasedLexical(Cachet_ContextRef cx) {
+  return JSOp::InitAliasedLexical;
+}
+
+inline Type_JSOp::Ref Variant_SetGName(Cachet_ContextRef cx) {
+  return JSOp::SetGName;
+}
+
+inline Type_JSOp::Ref Variant_StrictSetGName(Cachet_ContextRef cx) {
+  return JSOp::StrictSetGName;
 }
 
 };  // namespace Impl_JSOp

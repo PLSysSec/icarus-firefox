@@ -545,6 +545,77 @@ impl GetElemIRGenerator {
     }
 }
 
+struct SetPropIRGenerator;
+
+impl SetPropIRGenerator {
+    var op_: JSOp;
+    var idValue: Value;
+
+    fn tryAttachNativeSetSlot(
+        object: Object,
+        objectId: ObjectId,
+        key: PropertyKey,
+        rhsValueId: ValueId,
+    ) emits CacheIR -> AttachDecision {
+        if !canAttachNativeSetSlot(SetPropIRGenerator::op_, object, key, out let propInfo) {
+            return AttachDecision::NoAction;
+        }
+
+        // Megamorphic store slot stubs (MegamorphicStoreSlot) are not handled
+        // here.
+
+        // maybeEmitIdGuard: constant PropertyName, no guards necessary.
+        assert PropertyKey::isString(key);
+        assert Value::isString(SetPropIRGenerator::idValue);
+        assert String::isAtom(Value::toString(SetPropIRGenerator::idValue));
+        assert String::asAtom(Value::toString(SetPropIRGenerator::idValue)) ==
+            PropertyKey::toAtom(key);
+
+        let nativeObject = Object::toNativeObject(object);
+        let prop = MaybePropertyInfo::toPropertyInfo(propInfo);
+        if !isGlobalLexicalSetGName(SetPropIRGenerator::op_, nativeObject, prop) {
+            testMatchingNativeReceiver(nativeObject, objectId);
+        }
+
+        emitStoreSlotAndReturn(objectId, nativeObject, prop, rhsValueId);
+        AttachDecision::Attach
+    }
+}
+
+struct SetElemIRGenerator;
+
+impl SetElemIRGenerator {
+    var op_: JSOp;
+    var keyValue: Value;
+    var keyValueId: ValueId;
+
+    fn tryAttachNativeSetSlot(
+        object: Object,
+        objectId: ObjectId,
+        key: PropertyKey,
+        rhsValueId: ValueId,
+    ) emits CacheIR -> AttachDecision {
+        if !canAttachNativeSetSlot(SetElemIRGenerator::op_, object, key, out let propInfo) {
+            return AttachDecision::NoAction;
+        }
+
+        // Megamorphic store slot stubs (MegamorphicStoreSlot) are not handled
+        // here.
+
+        // maybeEmitIdGuard
+        emitIdGuard(SetElemIRGenerator::keyValueId, SetElemIRGenerator::keyValue, key);
+
+        let nativeObject = Object::toNativeObject(object);
+        let prop = MaybePropertyInfo::toPropertyInfo(propInfo);
+        if !isGlobalLexicalSetGName(SetElemIRGenerator::op_, nativeObject, prop) {
+            testMatchingNativeReceiver(nativeObject, objectId);
+        }
+
+        emitStoreSlotAndReturn(objectId, nativeObject, prop, rhsValueId);
+        AttachDecision::Attach
+    }
+}
+
 enum NativeGetPropKind {
     None,
     Slot,
@@ -581,6 +652,89 @@ fn canAttachNativeGetProp(
 }
 
 fn isCacheableProtoChain(object: NativeObject, holder: NativeObject) -> Bool;
+
+fn lookupShapeForSetSlot(jsop: JSOp, nativeObject: NativeObject, key: PropertyKey)
+    -> MaybePropertyInfo
+{
+    let maybeProp = NativeObject::lookupPure(nativeObject, key);
+    if !MaybePropertyInfo::isPropertyInfo(maybeProp) {
+        return MaybePropertyInfo::none();
+    }
+
+    let prop = MaybePropertyInfo::toPropertyInfo(maybeProp);
+    if !PropertyInfo::isDataProperty(prop) || !PropertyInfo::writable(prop) {
+        return MaybePropertyInfo::none();
+    }
+
+    // If this is an op like JSOp::InitElem / [[DefineOwnProperty]], the
+    // property's attributes may have to be changed too, so make sure it's a
+    // simple data property.
+    if JSOp::isPropertyInitOp(jsop) &&
+        (!PropertyInfo::configurable(prop) || !PropertyInfo::enumerable(prop))
+    {
+        return MaybePropertyInfo::none();
+    }
+
+    maybeProp
+}
+
+fn canAttachNativeSetSlot(
+    jsop: JSOp, object: Object, key: PropertyKey, out prop: MaybePropertyInfo
+) -> Bool {
+    if !Object::isNativeObject(object) {
+        return false;
+    }
+
+    prop = lookupShapeForSetSlot(jsop, Object::toNativeObject(object), key);
+    MaybePropertyInfo::isPropertyInfo(prop)
+}
+
+// There is no need to guard on the shape. Global lexical bindings are
+// non-configurable and can not be shadowed.
+fn isGlobalLexicalSetGName(jsop: JSOp, nativeObject: NativeObject, prop: PropertyInfo) -> Bool {
+    // Ensure that the env can't change.
+    if jsop != JSOp::SetGName && jsop != JSOp::StrictSetGName {
+        return false;
+    }
+
+    if !Object::isGlobalLexicalEnvironmentObject(nativeObject) {
+        return false;
+    }
+
+    // Uninitialized let bindings use a RuntimeLexicalErrorObject.
+    assert !Value::isMagic(NativeObject::getSlot(nativeObject, PropertyInfo::slot(prop)));
+    assert PropertyInfo::writable(prop);
+    assert !PropertyInfo::configurable(prop);
+    true
+}
+
+// guardShapeForOwnProperties: guard shape to detect changes to (non-dense) own
+// properties. This also implies guardShapeForClass.
+fn testMatchingNativeReceiver(nativeObject: NativeObject, objectId: ObjectId) emits CacheIR {
+    let shape = Object::shapeOf(nativeObject);
+    assert Class::isNativeObject(Shape::classOf(shape));
+
+    let shapeField = CacheIR::writeShapeField(shape);
+    emit CacheIR::GuardShape(objectId, shapeField);
+}
+
+fn emitStoreSlotAndReturn(
+    objectId: ObjectId, nativeObject: NativeObject, prop: PropertyInfo, rhsValueId: ValueId
+) emits CacheIR {
+    let slot = PropertyInfo::slot(prop);
+    if NativeObject::hasFixedSlot(nativeObject, slot) {
+        let offset = NativeObject::offsetOfFixedSlot(slot);
+        let offsetField = CacheIR::writeInt32Field(offset as Int32);
+        emit CacheIR::StoreFixedSlot(objectId, offsetField, rhsValueId);
+    } else {
+        let offset = NativeObjectSlots::offsetOfSlot(
+            slot - NativeObject::numFixedSlots(nativeObject)
+        );
+        let offsetField = CacheIR::writeInt32Field(offset as Int32);
+        emit CacheIR::StoreDynamicSlot(objectId, offsetField, rhsValueId);
+    }
+    emit CacheIR::ReturnFromIC();
+}
 
 fn isCacheableGetPropSlot(object: NativeObject, holder: NativeObject, prop: PropertyInfo) -> Bool {
     assert isCacheableProtoChain(object, holder);

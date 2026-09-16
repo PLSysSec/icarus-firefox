@@ -235,4 +235,26 @@ impl JSOp {
     fn isLooseEqualityOp(jsop: JSOp) -> Bool {
         jsop == JSOp::Eq || jsop == JSOp::Ne
     }
+
+    // Ops with the JOF_PROPINIT format flag.
+    fn isPropertyInitOp(jsop: JSOp) -> Bool {
+        jsop == JSOp::InitProp ||
+            jsop == JSOp::InitHiddenProp ||
+            jsop == JSOp::InitLockedProp ||
+            jsop == JSOp::InitElem ||
+            jsop == JSOp::InitHiddenElem ||
+            jsop == JSOp::InitLockedElem ||
+            jsop == JSOp::InitPropGetter ||
+            jsop == JSOp::InitHiddenPropGetter ||
+            jsop == JSOp::InitElemGetter ||
+            jsop == JSOp::InitHiddenElemGetter ||
+            jsop == JSOp::InitPropSetter ||
+            jsop == JSOp::InitHiddenPropSetter ||
+            jsop == JSOp::InitElemSetter ||
+            jsop == JSOp::InitHiddenElemSetter ||
+            jsop == JSOp::InitElemArray ||
+            jsop == JSOp::InitElemInc ||
+            jsop == JSOp::InitGLexical ||
+            jsop == JSOp::InitAliasedLexical
+    }
 }

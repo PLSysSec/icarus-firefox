@@ -9,6 +9,7 @@
 #include "mozilla/FloatingPoint.h"
 
 #include "jit/CacheIRCompiler.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/JSObject.h"
 
 using namespace mozilla;
@@ -159,6 +160,10 @@ Type_Bool::Val Fn_lookupPropertyPureUnchecked(
   return result;
 }
 
+Type_Bool::Val Fn_isGlobalLexicalEnvironmentObject(Cachet_ContextRef cx, Type_Object::Ref param_object) {
+  return param_object->is<GlobalLexicalEnvironmentObject>();
+}
+
 };  // namespace Impl_Object
 
 namespace Impl_NativeObject {
@@ -184,6 +189,10 @@ Type_NativeObjectElements::Val Fn_getElementsHeaderUnchecked(Cachet_ContextRef c
 
 Type_Bool::Val Fn_containsDenseElement(Cachet_ContextRef cx, Type_NativeObject::Ref param_nativeObject, Type_UInt32::Ref param_index) {
   return param_nativeObject->containsDenseElement(param_index);
+}
+
+Type_MaybePropertyInfo::Val Fn_lookupPureUnchecked(Cachet_ContextRef cx, Type_NativeObject::Ref param_nativeObject, Type_PropertyKey::Ref param_key) {
+  return param_nativeObject->lookupPure(param_key);
 }
 
 };  // namespace Impl_NativeObject
@@ -336,6 +345,18 @@ Type_Bool::Val Fn_isAccessorProperty(Cachet_ContextRef cx, Type_PropertyFlags::R
 
 Type_Bool::Val Fn_isCustomDataProperty(Cachet_ContextRef cx, Type_PropertyFlags::Ref param_flags) {
   return param_flags.isCustomDataProperty();
+}
+
+Type_Bool::Val Fn_configurable(Cachet_ContextRef cx, Type_PropertyFlags::Ref param_flags) {
+  return param_flags.configurable();
+}
+
+Type_Bool::Val Fn_enumerable(Cachet_ContextRef cx, Type_PropertyFlags::Ref param_flags) {
+  return param_flags.enumerable();
+}
+
+Type_Bool::Val Fn_writable(Cachet_ContextRef cx, Type_PropertyFlags::Ref param_flags) {
+  return param_flags.writable();
 }
 
 };  // namespace Impl_PropertyFlags
@@ -1701,6 +1722,22 @@ void EmitOp_LoadDynamicSlotResult(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, 
   ops.writeOp(CacheOp::LoadDynamicSlotResult);
   ops.writeOperandId(param_objectId);
   ops.writeStubField(param_slotField);
+  ops.assertLengthMatches();
+}
+
+void EmitOp_StoreFixedSlot(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ObjectId::Ref param_objectId, Type_Int32Field::Ref param_slotField, Type_ValueId::Ref param_rhsId) {
+  ops.writeOp(CacheOp::StoreFixedSlot);
+  ops.writeOperandId(param_objectId);
+  ops.writeStubField(param_slotField);
+  ops.writeOperandId(param_rhsId);
+  ops.assertLengthMatches();
+}
+
+void EmitOp_StoreDynamicSlot(Cachet_ContextRef cx, IR_CacheIR::OpsRef ops, Type_ObjectId::Ref param_objectId, Type_Int32Field::Ref param_slotField, Type_ValueId::Ref param_rhsId) {
+  ops.writeOp(CacheOp::StoreDynamicSlot);
+  ops.writeOperandId(param_objectId);
+  ops.writeStubField(param_slotField);
+  ops.writeOperandId(param_rhsId);
   ops.assertLengthMatches();
 }
 
