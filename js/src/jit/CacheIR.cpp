@@ -3677,6 +3677,37 @@ AttachDecision SetPropIRGenerator::tryAttachNativeSetSlot(HandleObject obj,
                                                           ObjOperandId objId,
                                                           HandleId id,
                                                           ValOperandId rhsId) {
+#ifdef JS_CACHET
+  // The Cachet port doesn't cover the megamorphic store slot stub; leave that
+  // case to the C++ implementation below.
+  const bool isMegamorphicSetProp = mode_ == ICState::Mode::Megamorphic &&
+                                    cacheKind_ == CacheKind::SetProp &&
+                                    IsPropertySetOp(JSOp(*pc_));
+  if (!isMegamorphicSetProp) {
+    AttachDecision decision;
+    if (cacheKind_ == CacheKind::SetProp) {
+      decision =
+        cachet::Impl_SetPropIRGenerator::Fn_tryAttachNativeSetSlot(
+          cachet::CachetContext {nullptr, cx_, &writer, this},
+          writer,
+          obj, objId, id, rhsId
+        );
+    } else {
+      MOZ_ASSERT(cacheKind_ == CacheKind::SetElem);
+      decision =
+        cachet::Impl_SetElemIRGenerator::Fn_tryAttachNativeSetSlot(
+          cachet::CachetContext {nullptr, cx_, &writer, this},
+          writer,
+          obj, objId, id, rhsId
+        );
+    }
+    if (decision == AttachDecision::Attach) {
+      trackAttached("NativeSlot");
+    }
+    return decision;
+  }
+#endif
+
   Maybe<PropertyInfo> prop;
   if (!CanAttachNativeSetSlot(JSOp(*pc_), obj, id, &prop)) {
     return AttachDecision::NoAction;

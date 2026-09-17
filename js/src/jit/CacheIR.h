@@ -1330,7 +1330,10 @@ class MOZ_RAII IRGenerator {
   CacheIRWriter writer;
   JSContext* cx_;
   HandleScript script_;
+  // TODO(spinda): Make this protected again.
+ public:
   jsbytecode* pc_;
+ protected:
   CacheKind cacheKind_;
   ICState::Mode mode_;
   bool isFirstStub_;
@@ -1536,7 +1539,10 @@ class MOZ_RAII BindNameIRGenerator : public IRGenerator {
 // SetPropIRGenerator generates CacheIR for a SetProp IC.
 class MOZ_RAII SetPropIRGenerator : public IRGenerator {
   HandleValue lhsVal_;
+  // TODO(spinda): Make this private again.
+ public:
   HandleValue idVal_;
+ private:
   HandleValue rhsVal_;
 
  public:
@@ -1545,11 +1551,14 @@ class MOZ_RAII SetPropIRGenerator : public IRGenerator {
  private:
   DeferType deferType_ = DeferType::None;
 
+  // TODO(spinda): Make this private again.
+ public:
   ValOperandId setElemKeyValueId() const {
     MOZ_ASSERT(cacheKind_ == CacheKind::SetElem);
     return ValOperandId(1);
   }
 
+ private:
   ValOperandId rhsValueId() const {
     if (cacheKind_ == CacheKind::SetProp) {
       return ValOperandId(1);

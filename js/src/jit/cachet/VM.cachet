@@ -225,6 +225,19 @@ impl RegData {
     unsafe fn toStackIndexUnchecked(data: RegData) -> UInt64;
 
     #[spec]
+    fn writeData(base: RegData, offset: Int64, data: RegData) {
+        if RegData::isUnboxedValue(base) {
+            let value = RegData::toUnboxedValue(base);
+            Value::writeData(value, offset, data);
+        } else if RegData::isNativeObjectSlots(base) {
+            let slots = RegData::toNativeObjectSlots(base);
+            NativeObjectSlots::writeData(slots, offset, data);
+        } else {
+            assert false;
+        }
+    }
+
+    #[spec]
     fn readData(data: RegData, offset: Int64) -> RegData {
         if RegData::isUnboxedValue(data) {
             let value = RegData::toUnboxedValue(data);
@@ -618,6 +631,12 @@ impl Value {
     unsafe fn toBigIntUnchecked(value: Value) -> BigInt;
 
     #[spec]
+    fn writeData(value: Value, offset: Int64, data: RegData) {
+        assert Value::isObject(value);
+        Object::writeData(Value::toObject(value), offset, data);
+    }
+
+    #[spec]
     fn readData(value: Value, offset: Int64) -> RegData {
         if Value::isObject(value) {
             let object = Value::toObject(value);
@@ -680,6 +699,8 @@ impl Object {
         (unsafe { object as ArgumentsObject })
     }
 
+    fn isGlobalLexicalEnvironmentObject(object: Object) -> Bool;
+
     fn getFixedSlot(object: Object, slot: UInt32) -> Value {
         let nativeObject = Object::toNativeObject(object);
         NativeObject::getFixedSlot(nativeObject, slot)
@@ -721,6 +742,12 @@ impl Object {
         out holder: MaybeNativeObject,
         out propInfo: PropertyResult,
     ) -> Bool;
+
+    #[spec]
+    fn writeData(object: Object, offset: Int64, data: RegData) {
+        assert Object::isNativeObject(object);
+        NativeObject::writeData(Object::toNativeObject(object), offset, data);
+    }
 
     // read RegData at the specified memory offset of the Object
     #[spec]
@@ -828,6 +855,30 @@ impl NativeObject {
 
     unsafe fn getSlotsUnchecked(heap: Heap, nativeObject: NativeObject) -> NativeObjectSlots;
 
+    fn getSlot(nativeObject: NativeObject, slot: UInt32) -> Value {
+        assert NativeObject::hasSlot(nativeObject, slot);
+        if NativeObject::hasFixedSlot(nativeObject, slot) {
+            return NativeObject::getFixedSlot(nativeObject, slot);
+        }
+        let slots = NativeObject::getSlots(nativeObject);
+        NativeObjectSlots::getDynamicSlot(slots, slot - NativeObject::numFixedSlots(nativeObject))
+    }
+
+    fn lookupPure(nativeObject: NativeObject, key: PropertyKey) -> MaybePropertyInfo {
+        let maybeProp = (unsafe { NativeObject::lookupPureUnchecked(nativeObject, key) });
+
+        if MaybePropertyInfo::isPropertyInfo(maybeProp) {
+            let prop = MaybePropertyInfo::toPropertyInfo(maybeProp);
+            if PropertyInfo::hasSlot(prop) {
+                assume NativeObject::hasSlot(nativeObject, PropertyInfo::slot(prop));
+            }
+        }
+
+        maybeProp
+    }
+
+    unsafe fn lookupPureUnchecked(nativeObject: NativeObject, key: PropertyKey) -> MaybePropertyInfo;
+
     fn getElementsHeader(nativeObject: NativeObject) -> NativeObjectElements {
         (unsafe { NativeObject::getElementsHeaderUnchecked(heap, nativeObject) } )
     }
@@ -836,6 +887,39 @@ impl NativeObject {
     NativeObjectElements;
 
     fn containsDenseElement(nativeObject: NativeObject, index: UInt32) -> Bool;
+
+    #[spec]
+    fn setFixedSlot(nativeObject: NativeObject, slot: UInt32, value: Value) {
+        assert NativeObject::hasFixedSlot(nativeObject, slot);
+        let shape = Object::shapeOf(nativeObject);
+
+        heap = (unsafe { NativeObject::setFixedSlotUnchecked(heap, nativeObject, slot, value) });
+
+        // Frame: a slot store doesn't change the object's shape.
+        assume Object::shapeOf(nativeObject) == shape;
+        // The store landed.
+        assume NativeObject::getFixedSlot(nativeObject, slot) == value;
+    }
+
+    #[spec]
+    unsafe fn setFixedSlotUnchecked(
+        heap: Heap, nativeObject: NativeObject, slot: UInt32, value: Value
+    ) -> Heap;
+
+    #[spec]
+    fn writeData(nativeObject: NativeObject, offset: Int64, data: RegData) {
+        // this is the only thing in the `writeData` spec that currently does not 
+        // mirror `readData` exactly. This is because we don't need to model anything
+        // but a fixed-slot store at the moment - so this mirrors the `offset >= NativeObject::offsetOfFixedSlots as Int64` 
+        // branch of `readData` 
+
+        assert offset >= NativeObject::offsetOfFixedSlots as Int64;
+        let slotOffset = offset as UInt64 - NativeObject::sizeOf;
+        assert slotOffset % Value::sizeOf == 0_u64;
+        assert slotOffset / Value::sizeOf < Shape::fixedSlotLimit;
+        let slot = (slotOffset / Value::sizeOf) as UInt32;
+        NativeObject::setFixedSlot(nativeObject, slot, RegData::toValue(data));
+    }
 
     #[spec]
     fn readData(nativeObject: NativeObject, offset: Int64) -> RegData {
@@ -878,6 +962,25 @@ impl NativeObjectSlots {
 
     unsafe fn getDynamicSlotUnchecked(heap: Heap, slots: NativeObjectSlots, slot: UInt32) ->
     Value;
+
+    #[spec]
+    fn setDynamicSlot(slots: NativeObjectSlots, slot: UInt32, value: Value) {
+        assert slot < NativeObjectSlots::length(slots);
+        heap = (unsafe { NativeObjectSlots::setDynamicSlotUnchecked(heap, slots, slot, value) });
+        assume NativeObjectSlots::getDynamicSlot(slots, slot) == value;
+    }
+
+    #[spec]
+    unsafe fn setDynamicSlotUnchecked(
+        heap: Heap, slots: NativeObjectSlots, slot: UInt32, value: Value
+    ) -> Heap;
+
+    #[spec]
+    fn writeData(slots: NativeObjectSlots, offset: Int64, data: RegData) {
+        assert offset % Value::sizeOf as Int64 == 0_i64;
+        let slot = (offset / Value::sizeOf as Int64) as UInt32;
+        NativeObjectSlots::setDynamicSlot(slots, slot, RegData::toValue(data));
+    }
 
     #[spec]
     fn readData(slots: NativeObjectSlots, offset: Int64) -> RegData {
@@ -1161,6 +1264,10 @@ impl PropertyFlags {
     fn isAccessorProperty(flags: PropertyFlags) -> Bool;
     fn isCustomDataProperty(flags: PropertyFlags) -> Bool;
 
+    fn configurable(flags: PropertyFlags) -> Bool;
+    fn enumerable(flags: PropertyFlags) -> Bool;
+    fn writable(flags: PropertyFlags) -> Bool;
+
     fn isDataProperty(flags: PropertyFlags) -> Bool {
         !PropertyFlags::isAccessorProperty(flags) && !PropertyFlags::isCustomDataProperty(flags)
     }
@@ -1177,6 +1284,18 @@ impl PropertyInfo {
 
     fn isCustomDataProperty(info: PropertyInfo) -> Bool {
         PropertyFlags::isCustomDataProperty(PropertyInfo::flags(info))
+    }
+
+    fn configurable(info: PropertyInfo) -> Bool {
+        PropertyFlags::configurable(PropertyInfo::flags(info))
+    }
+
+    fn enumerable(info: PropertyInfo) -> Bool {
+        PropertyFlags::enumerable(PropertyInfo::flags(info))
+    }
+
+    fn writable(info: PropertyInfo) -> Bool {
+        PropertyFlags::writable(PropertyInfo::flags(info))
     }
 
     fn hasSlot(info: PropertyInfo) -> Bool {

@@ -745,6 +745,16 @@ impl ABIFunction {
     fn clobberVolatileRegs();
 }
 
+struct GCBarrier;
+
+impl GCBarrier {
+    #[spec]
+    fn pre();
+
+    #[spec]
+    fn post();
+}
+
 ir MASM {
     // NOTE: Needs to be implemented to call the equivalent
     // op with string as argument.
@@ -811,6 +821,22 @@ ir MASM {
         } else if condition == Condition::LessThan && lhsInt32 < rhsInt32 {
             MASM::setInt32(dstReg, srcInt32);
         }
+    }
+
+    op StoreValueAddress(valueReg: ValueReg, address: Address) {
+        let value = MASM::getValue(valueReg);
+        let data = RegData::fromValue(value);
+        RegData::writeData(MASM::getData(address.base), address.offset, data);
+    }
+
+    // EmitPreBarrier(masm, address, mirType)
+    op PreBarrierAddress(address: Address, mirType: MIRType) {
+        GCBarrier::pre();
+    }
+
+    // CacheIRCompiler::emitPostBarrierSlot(obj, val, scratch)
+    op PostBarrierSlot(objectReg: Reg, valueReg: ValueReg, scratchReg: Reg) {
+        GCBarrier::post();
     }
 
     op StoreBool(bool: Bool, reg: Reg) {

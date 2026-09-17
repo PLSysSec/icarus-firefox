@@ -1025,6 +1025,37 @@ ir CacheIR emits MASM {
         CacheIR::releaseReg(scratchReg);
     }
 
+    op StoreFixedSlot(objectId: ObjectId, slotField: Int32Field, rhsId: ValueId) {
+        let objectReg = CacheIR::useObjectId(objectId);
+        let slotOffset = CacheIR::readInt32Field(slotField);
+        let rhsReg = CacheIR::useValueId(rhsId);
+        let scratchReg = CacheIR::allocateReg();
+
+        let slot = Address::new(objectReg, slotOffset);
+        emit MASM::PreBarrierAddress(slot, MIRType::Value);
+        emit MASM::StoreValueAddress(rhsReg, slot);
+        emit MASM::PostBarrierSlot(objectReg, rhsReg, scratchReg);
+
+        CacheIR::releaseReg(scratchReg);
+    }
+
+    op StoreDynamicSlot(objectId: ObjectId, slotField: Int32Field, rhsId: ValueId) {
+        let objectReg = CacheIR::useObjectId(objectId);
+        let slotOffset = CacheIR::readInt32Field(slotField);
+        let rhsReg = CacheIR::useValueId(rhsId);
+
+        let scratchReg = CacheIR::allocateReg();
+        emit MASM::LoadPtrAddress(
+            Address::new(objectReg, NativeObject::offsetOfSlots as Int32), scratchReg
+        );
+        let slot = Address::new(scratchReg, slotOffset);
+        emit MASM::PreBarrierAddress(slot, MIRType::Value);
+        emit MASM::StoreValueAddress(rhsReg, slot);
+        emit MASM::PostBarrierSlot(objectReg, rhsReg, scratchReg);
+
+        CacheIR::releaseReg(scratchReg);
+    }
+
     op LoadDenseElementResult(objectId: ObjectId, indexId: Int32Id) {
         let outputReg = CacheIR::allocateOutputReg();
 
